@@ -339,6 +339,7 @@ GitHub 在中国大陆可能不稳定；`git clone`/`git push` 可能被重置�
 - CA6JAU MMDVM_HS 固件
 - WPSD 的 Live Caller 风格作为界面灵感（未复制 WPSD 代码）
 - DejaVu Sans Mono、Droid Sans Fallback、Pillow — 系统依赖，不随仓库分发
+- 开发协助：Claude Code（Anthropic）——AI 辅助编写与审查，不是项目作者
 
 本仓库脚本、模板和 OLED 代码以 **GPL-2.0** 发布；上游补丁仍受其原始 GPLv2 条款约束。
 详见 [LICENSE](LICENSE)。

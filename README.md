@@ -353,6 +353,7 @@ untrusted proxies.
 - CA6JAU MMDVM_HS firmware
 - WPSD's Live Caller style as UI inspiration (no WPSD code copied)
 - DejaVu Sans Mono, Droid Sans Fallback, Pillow — system dependencies, not bundled
+- Development assistance: Claude Code (Anthropic) — AI pair-programming and review; not the project author
 
 This repository's scripts, templates and OLED code are released under **GPL-2.0**;
 upstream patches remain subject to their original GPLv2 terms. See [LICENSE](LICENSE).
