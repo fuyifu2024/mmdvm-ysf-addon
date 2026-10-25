@@ -1,73 +1,94 @@
 # mmdvm-ysf-addon
 
-**Add an MMDVM YSF hotspot to the Ubuntu / Raspberry Pi 5 system you already use — no dedicated image, no OS replacement, reversible.**
+**Add an MMDVM YSF hotspot to the Linux system you already use — no dedicated image, no OS replacement, reversible.**
 
-**在你已经在用的 Ubuntu / Pi 5 上顺手加一个 MMDVM YSF 热点——不换系统、不刷独立镜像、可以卸载回滚。**
+English | [简体中文](README.zh-CN.md)
 
 ![OLED Live Caller](docs/oled-live-caller.png)
 
 ---
 
-## 这是什么
+## What this is
 
-很多 MMDVM 热点方案要求你刷一张专用镜像（Pi-Star / WPSD），把整台机器变成“热点机”。
-这个项目走另一条路：**它是一个 add-on**。适用于家里已经有一台在跑 Ubuntu 的
-Raspberry Pi 5（服务器、桌面机、电台电脑都行），想顺手多跑一个 YSF 热点的情况。
+Most MMDVM hotspot guides ask you to flash a dedicated image (Pi-Star / WPSD) and turn
+the whole machine into a hotspot. This project is the other approach: **an add-on for
+a machine you already use** — a home server, a desktop Pi, or a radio PC running
+Ubuntu/Debian.
 
-它会在现有系统里增加：
+It adds:
 
-- 一个 `mmdvm` 系统用户
-- 三个 systemd 服务：`ysfgateway`、`mmdvmhost`、`oled-display`
-- `/etc/mmdvm`、`/var/log/mmdvm`、`/var/lib/mmdvm`
+- a dedicated `mmdvm` system user
+- three systemd services: `ysfgateway`, `mmdvmhost`, `oled-display`
+- `/etc/mmdvm`, `/var/log/mmdvm`, `/var/lib/mmdvm`
 - `/usr/local/bin/{MMDVM-Host,YSFGateway,oled_display.py}`
-- `/boot/firmware/config.txt` 中的 `dtoverlay=uart0-pi5`
-- 一组构建/运行依赖（见下文）
+- a boot overlay on Raspberry Pi (`uart0-pi5` on Pi 5; `enable_uart` + BT overlay on
+  Pi 4/3 — experimental)
+- build/runtime dependencies listed below
 
-它**不会**替换 OS、改启动顺序、刷 HAT 固件、重装桌面，或接管你已有的其它服务。
-所有改动集中在上面这些 add-on 自己的文件和三个服务里。
+It does **not** replace the OS, change boot order, flash HAT firmware, reinstall the
+desktop, or take over unrelated services. A platform without a Pi GPIO header (x86)
+gets no boot-config changes at all.
 
-> 老实说：它**不是零改动**。启用 GPIO14/15 的 UART、安装依赖、增加三个服务都是
-> 真实改动；所以项目提供了 preflight 冲突检查和 uninstall 回滚。README 的
-> “会改什么”一节把每项都列清楚。
+> Honest note: this is **not** a zero-change install. It adds packages, a user,
+> directories, three services and (on Pi) boot-config lines. That is why the project
+> ships preflight conflict checks and an uninstall path. The “What it changes” table
+> below lists everything.
 
-## 已验证环境
+## Platform support
 
-- Raspberry Pi 5 + **Ubuntu 26.04.1 LTS (arm64)**
-- MMDVM_HS_Hat，固件 `MMDVM_HS_Hat-v1.5.2 20201108 14.7456MHz ADF7021 FW by CA6JAU`
-- 板载 SSD1306 OLED（Pi I2C-1，地址 `0x3C`）
-- YSF 反射器 `46001 / CN-C4FM-TG46001`（`222.128.4.82:42000`）
-- 作者：BI2RIP（FT-5D / FTM-510D）
+| Platform | Status | Modem connection | OLED |
+|---|---|---|---|
+| **Raspberry Pi 5 + Ubuntu 26.04** | **Tested by the author** | GPIO14/15 HAT, `dtoverlay=uart0-pi5` | Pi I2C-1, 0x3C (tested) |
+| Raspberry Pi 4 / 3 / Zero 2 W | **Experimental — not hardware-tested** | GPIO14/15 HAT, `enable_uart=1` + `miniuart-bt`/`disable-bt`, reboot | Pi I2C, theoretically |
+| x86_64 Ubuntu / Debian | **Build/CI only — hardware NOT tested** | **USB serial MMDVM modem** (`ttyUSB`/`ttyACM`); a Pi GPIO HAT cannot plug in directly | Usually none; optional external I2C is untested |
+| Other Linux / special UART bridges | Manual / unsupported | USB serial; set `MODEM_PORT` yourself | Optional/manual |
 
-作者现场实测过 144.3000 MHz 的 2m 配置，但**公开示例默认是 438.8000 MHz**。
-144.300 属于 2m 弱信号/SSB 呼叫区域，**不建议**作为热点默认频点；详见下面的频率说明。
+CI only proves that the upstream sources, patches and this project's build run on an
+x86_64 GitHub runner. It does **not** prove UART, USB enumeration, I2C, systemd
+installation, RF, or a reflector link on any of those platforms. Only the Pi 5
+configuration below was tested with real hardware.
 
-## 前提
+## Tested configuration
 
-- Pi 5 上已经能正常跑 Ubuntu，且你能 SSH 或直接在桌面操作。
-- GPIO14/15 没有被其它 HAT/服务占用；I2C-1 上不要有第二个 0x3C 设备。
-- HAT 的 STM32 固件已经刷好（本项目**不**负责刷固件）。
-- 机器上**没有**已经运行的 MMDVM / Pi-Star / WPSD：preflight 会检查并拒绝冲突。
-- 你的业余无线电呼号、合法频点，以及（如适用）当地频率协调。
-- Python 3 + Pillow（`python3-pil`，prepare 会安装）。
+- Raspberry Pi 5 Model B, **Ubuntu 26.04.1 LTS (arm64)**
+- MMDVM_HS_Hat firmware `MMDVM_HS_Hat-v1.5.2 20201108 14.7456MHz ADF7021 FW by CA6JAU`
+- On-board SSD1306 OLED on Pi I2C-1 at `0x3C`
+- YSF reflector `46001 / CN-C4FM-TG46001` (`222.128.4.82:42000`)
+- Author: BI2RIP (FT-5D / FTM-510D)
 
-## 快速开始
+The author also field-tested a **144.3000 MHz 2m** setup on this HAT. The public
+example intentionally uses **438.8000 MHz** instead. 144.300 is the 2m weak-signal/SSB
+calling area and is **not** recommended as a hotspot default; see the frequency note.
+
+## Requirements
+
+- An existing Linux machine; Ubuntu/Debian + systemd is the supported install path.
+- For Pi: a compatible MMDVM HAT with a working STM32 firmware, and free GPIO14/15.
+- For x86: a **USB serial MMDVM modem** (or a USB-TTL adapter wired to a modem).
+- A valid amateur call sign and a locally coordinated frequency.
+- Python 3 + Pillow (`python3-pil`) for the optional OLED.
+- No existing MMDVM / Pi-Star / WPSD install on the same machine; preflight refuses
+  to overwrite one.
+- This project does **not** flash firmware or provide a prebuilt OS image.
+
+## Quick start
 
 ```bash
 git clone https://github.com/fuyifu2024/mmdvm-ysf-addon.git
 cd mmdvm-ysf-addon
 
 cp config.example.env config.env
-$EDITOR config.env          # 至少改 CALLSIGN 和 FREQUENCY
+$EDITOR config.env          # CALLSIGN, FREQUENCY, MODEM_PORT, reflector...
 
-./scripts/preflight.sh      # 只读检查：Pi 5、UART、I2C、冲突
-sudo ./scripts/prepare-system.sh   # UART overlay、依赖、dialout/i2c
-python3 scripts/render_configs.py # 生成 build/etc 配置
-./scripts/build.sh          # 下载固定上游 + 打补丁 + 编译
-sudo ./scripts/install-services.sh # 安装并启动三个服务
-./scripts/status.sh         # 查看服务、链路、日志、硬件
+./scripts/preflight.sh      # read-only: platform, serial, OLED, conflicts
+sudo ./scripts/prepare-system.sh
+python3 scripts/render_configs.py
+./scripts/build.sh
+sudo ./scripts/install-services.sh
+./scripts/status.sh
 ```
 
-也可以：
+Or use the Makefile:
 
 ```bash
 make preflight
@@ -78,33 +99,36 @@ sudo make install
 make status
 ```
 
-如果 `prepare-system.sh` 结束时提示 `/dev/ttyAMA0` 还不存在，重启一次再继续；
-`config.txt` 里的 overlay 会在下次启动时生效。`prepare-system.sh` 不会重启现有服务；
-`install-services.sh` 只重启本 add-on 的三个服务。
+If `prepare-system.sh` reports that the UART is not ready yet, reboot once and continue.
+`prepare-system.sh` does not restart unrelated services; `install-services.sh` only
+restarts the three add-on services.
 
-## 配置
+## Configuration
 
-`config.example.env` 是公开示例（N0CALL / 438.8000），复制成 `config.env` 后编辑。
-`config.env` 已被 `.gitignore` 排除，不会提交。
+Copy `config.example.env` to `config.env` (ignored by git) and edit it.
 
-| 键 | 说明 |
+| Key | Meaning |
 |---|---|
-| `CALLSIGN` | 你的呼号，大写字母/数字 3–10 位。示例 `N0CALL` 只是占位，发射前必须改。 |
-| `SUFFIX` | YSF 节点后缀，通常 `ND`。 |
-| `FREQUENCY` | 单频热点频率（MHz），RX/TX 相同。公开默认 `438.8000`。 |
-| `REFLECTOR_ID` | YSF 反射器编号，例如 `46001`。 |
-| `REFLECTOR_COUNTRY` | 反射器国家前缀，例如 `CN`。 |
-| `REFLECTOR_NAME` | 反射器短名，例如 `C4FM-TG46001`（**不要**带国家前缀）。 |
-| `REFLECTOR_DESC` | 描述文本。 |
-| `REFLECTOR_STARTUP` | 完整名，必须等于 `COUNTRY-NAME`，例如 `CN-C4FM-TG46001`。 |
-| `REFLECTOR_HOST` | 反射器地址（IPv4 或主机名）。 |
-| `REFLECTOR_PORT` | 反射器 UDP 端口，46001 是 `42000`。 |
-| `HOTSPOT_NAME` / `HOTSPOT_DESC` | YSFGateway Info 里的名称/描述。 |
+| `CALLSIGN` | Your callsign, 3–10 uppercase letters/digits. `N0CALL` is a placeholder; edit before transmitting. |
+| `SUFFIX` | YSF node suffix, normally `ND`. |
+| `FREQUENCY` | Simplex hotspot frequency in MHz, RX=TX. Public example: `438.8000`. |
+| `MODEM_PORT` | `auto` (single serial device; by-id preferred) or an explicit `/dev/...` path. |
+| `MODEM_BAUD` | Serial speed; 115200 is the tested MMDVM_HS value. |
+| `ENABLE_OLED` | `auto` (probe at install), `0`/`no` (disable), `1`/`yes` (force). |
+| `I2C_BUS` | I2C bus number for the OLED. Default `1`. |
+| `I2C_ADDRESS` | OLED address, default `0x3C`. |
+| `REFLECTOR_ID` | YSF reflector/room number, e.g. `46001`. |
+| `REFLECTOR_COUNTRY` | Reflector country prefix, e.g. `CN`. |
+| `REFLECTOR_NAME` | Reflector short name, e.g. `C4FM-TG46001` (without the country prefix). |
+| `REFLECTOR_STARTUP` | Full name, must equal `COUNTRY-NAME`, e.g. `CN-C4FM-TG46001`. |
+| `REFLECTOR_HOST` | Reflector IPv4 address or hostname. |
+| `REFLECTOR_PORT` | Reflector UDP port, `42000` for 46001. |
+| `REFLECTOR_DESC` / `HOTSPOT_NAME` / `HOTSPOT_DESC` | Display/description labels. |
 
-### 为什么 `Startup` 必须写完整名
+### Why `Startup` must be the full name
 
-当前 YSFGateway 源码用 `findByName()` 匹配 `Startup`，不是按数字 ID。JSON hosts 里
-的条目由 `COUNTRY + "-" + NAME` 组成完整名，所以：
+The current YSFGateway source matches `Startup` with `findByName()`, not by numeric ID.
+The hosts JSON entry becomes `COUNTRY + "-" + NAME`; therefore:
 
 ```ini
 REFLECTOR_COUNTRY=CN
@@ -112,22 +136,36 @@ REFLECTOR_NAME=C4FM-TG46001
 REFLECTOR_STARTUP=CN-C4FM-TG46001
 ```
 
-三者必须一致。`render_configs.py` 会校验，写错会直接报错，避免“网关启动了但没
-link 上”的坑。
+must agree. `render_configs.py` validates this, so a gateway can no longer start with a
+silent “not found” state.
 
-### 频率说明
+### Serial ports
 
-- 公开示例使用 **438.8000 MHz**，这是常见的 UHF 单频热点默认值之一；仍需确认你
-  当地没有同频中继/热点，并遵守所在国家的频段规划。
-- 作者现场用过 **144.3000 MHz** 做 2m 实验，HAT 与 2m 天线在该频率可收发；但
-  144.300 是国际公认的 2m 弱信号/SSB 呼叫区域，**不适合作为数字热点默认频点**。
-  本仓库只在 README 记录这一实测，不把它放进示例配置。请优先使用 438.8000 或
-  你当地协调过的频点。
-- 首次发射建议接 50Ω 假负载或确认驻波正常；不要用 430 MHz 天线在 144 MHz 发射。
+`MODEM_PORT=auto` prefers a single `/dev/serial/by-id/...` path, then
+`/dev/ttyAMA0`, `/dev/serial0`, `/dev/ttyUSB*`, `/dev/ttyACM*`, `/dev/ttySC*`.
+If more than one serial device is present, auto **refuses to guess**; set an explicit
+stable by-id path:
+
+```ini
+MODEM_PORT=/dev/serial/by-id/usb-...-if00
+```
+
+The generated `MMDVM-Host.ini` contains the resolved `UARTPort`. Re-render and restart
+after changing it.
+
+### Frequency
+
+- The example uses **438.8000 MHz**, a common UHF hotspot default. Confirm no local
+  repeater/hotspot uses it and follow your national band plan.
+- The author's **144.3000 MHz** 2m experiment is documented only as a field note.
+  144.300 is the 2m weak-signal/SSB calling area and is unsuitable as a public default.
+- First transmissions should use a dummy load or a known-good antenna. Do not use a
+  430 MHz antenna at 144 MHz.
 
 ## OLED Live Caller
 
-OLED 在 Pi 的 I2C-1 `0x3C`，由 Pi 侧直接驱动，不是 STM32 固件驱动。
+The OLED is optional. On the tested HAT it is an SSD1306 on Pi I2C-1 `0x3C`, driven by
+the host, not by the STM32 firmware.
 
 ```text
 ▓ LIVE CALLER        <your call> ▓
@@ -136,158 +174,187 @@ OLED 在 Pi 的 I2C-1 `0x3C`，由 Pi 侧直接驱动，不是 STM32 固件驱�
 ● <reflector> <frequency>   <clock>
 ```
 
-- 主位是当前/最近一次发射者的呼号（大号字）。
-- 右上角固定显示你自己的呼号（来自 `OWN_CALL`）。
-- 地区按呼号前缀离线推断；YSF 帧不带姓名/城市，所以没有 WPSD DMR 库里的姓名/城市。
-- `NET` = 来自反射器网络，`RF` = 本机射频；RF 会显示 BER。
-- 空闲 90 秒后显示 `STANDBY`；链路状态/时间一直在底部。
-- 生成 PNG 预览（不访问 I2C）：
+- Main line: current/last speaker's callsign.
+- Top right: your own callsign (`OWN_CALL`).
+- Region: inferred offline from the callsign prefix; YSF frames carry no name/city.
+- `NET` vs `RF`; RF also shows BER.
+- After 90 seconds of silence: `STANDBY`.
+- Generate a PNG without touching I2C:
 
 ```bash
 python3 oled/oled_display.py --preview /tmp/oled.png \
   --own-call N0CALL --reflector 46001 --frequency 438.800 --demo-call JA1ABC
 ```
 
-OLED 服务使用 `/etc/mmdvm/oled.env` 里的 `OWN_CALL`、`REFLECTOR_ID`、
-`FREQUENCY_LABEL`。如果机器没有 0x3C 屏幕，`install-services.sh` 会跳过 OLED 服务，
-MMDVM 服务仍可正常运行。
+The service reads `/etc/mmdvm/oled.env` for `OWN_CALL`, `REFLECTOR_ID`,
+`FREQUENCY_LABEL`, `I2C_BUS`, `I2C_ADDRESS`. If no OLED is found and
+`ENABLE_OLED=auto`, the installer skips the OLED service; MMDVM still runs.
 
-## 工作原理
+## How it works
 
 ```text
-FT-5D / FTM-510D  (C4FM, DN)
+FT-5D / FTM-510D  (C4FM, DN mode)
         │  144/430 MHz
         ▼
-MMDVM_HS_Hat (STM32) ── GPIO14/15 UART ── /dev/ttyAMA0
-        │
+MMDVM modem (STM32 HAT or USB MMDVM)
+        │  UART: /dev/ttyAMA0 or /dev/ttyUSB...
         ▼
    MMDVM-Host  ── 127.0.0.1:3200/4200 ──  YSFGateway
                                             │ UDP 42000
                                             ▼
                                  YSF reflector (e.g. 46001)
 
-SSD1306 OLED (I2C-1 0x3C) ◄── oled_display.py ◄── logs in /var/log/mmdvm
+SSD1306 (optional, I2C) ◄── oled_display.py ◄── /var/log/mmdvm logs
 ```
 
-三个 systemd 服务：
-
-| 服务 | 作用 |
+| Service | Role |
 |---|---|
-| `ysfgateway` | 连接反射器，把 MMDVM-Host 和 YSF 网络桥接起来 |
-| `mmdvmhost` | 驱动 HAT 的 STM32，收发 C4FM |
-| `oled-display` | 从日志读取链路/发射者，驱动 SSD1306 |
+| `ysfgateway` | Connects to the reflector and bridges MMDVM-Host to YSF |
+| `mmdvmhost` | Drives the modem and C4FM RF |
+| `oled-display` | Reads logs and drives the optional SSD1306 |
 
-日志：`/var/log/mmdvm/ysfgateway.log`、`/var/log/mmdvm/mmdvmhost.log`。
-服务错误仍在 journald；常用：
+Logs: `/var/log/mmdvm/ysfgateway.log`, `/var/log/mmdvm/mmdvmhost.log`.
+Service errors remain in journald.
 
-```bash
-./scripts/status.sh
-tail -f /var/log/mmdvm/ysfgateway.log
-tail -f /var/log/mmdvm/mmdvmhost.log
-journalctl -u oled-display -n 30
-```
+## Platform notes
 
-## 上游补丁
+### Raspberry Pi 5
 
-`build.sh` 会下载固定内容的上游源码，并应用两个补丁：
+`prepare-system.sh` adds `dtoverlay=uart0-pi5` to `/boot/firmware/config.txt`, tries to
+load it at runtime, and disables a serial getty on `ttyAMA0` if present. Reboot only if
+`/dev/ttyAMA0` is still missing. This is the **tested** path.
 
-1. **`0001-ysfgateway-optional-mqtt.patch`**：YSFGateway 上游在没有本地 MQTT
-   broker 时会直接退出；补丁改为“连不上 MQTT 就继续，不使用 MQTT”。
-2. **`0002-ysfgateway-ifstream-hosts.patch`**：上游用 `std::fstream`（默认读写）
-   打开 hosts 文件，root 只读的 `/etc/mmdvm/YSFHosts.json` 会 `EACCES`；补丁改为
-   `std::ifstream`。
+### Raspberry Pi 4 / 3 / Zero 2 W (experimental)
 
-`upstream.lock` 记录下载 URL 和 SHA-256。上游变化时构建会失败，提示更新 lock；
-更新后必须重新验证补丁能干净应用。
+This path is **not hardware-tested**. `prepare-system.sh` adds `enable_uart=1` and
+prefers `dtoverlay=miniuart-bt` (Bluetooth moves to the mini-UART) or falls back to
+`dtoverlay=disable-bt` (Bluetooth off). It edits `/boot/firmware/config.txt` or
+`/boot/config.txt`, backs it up, and requires a reboot. Verify that `/dev/ttyAMA0` is
+the modem UART on your board; Bluetooth changes may be undesirable on a desktop system.
 
-## 验证与通联
+### x86_64 with a USB MMDVM modem (build/CI only; hardware NOT tested)
 
-1. 看服务与链路：
+- A Pi GPIO HAT cannot be plugged into an x86 PC. Use a USB serial MMDVM modem.
+- x86 uses **no** `/proc/device-tree/model`, `config.txt`, `dtoverlay`, `pinctrl` or
+  serial-getty changes.
+- Set a stable `/dev/serial/by-id/...` path in `MODEM_PORT` (auto works with one modem).
+- The host builds the same MMDVM-Host/YSFGateway natively; CI proves x86_64 compilation,
+  not installation or RF.
+- OLED is usually unavailable; use `ENABLE_OLED=0`. An external USB-I2C display is
+  untested.
+- Non-apt distributions need the build dependencies installed manually.
+
+### Other Linux / special UART bridges
+
+Manual. A SC16IS752/SPI-UART HAT needs its own kernel overlay/driver and an explicit
+`MODEM_PORT`; this project does not auto-configure such bridges. Non-systemd systems are
+outside the supported install path.
+
+## What it changes
+
+| Adds | Does not change |
+|---|---|
+| packages: build tools, mosquitto/JSON dev libs, python3-pil, i2c-tools | OS or boot image |
+| user `mmdvm`; serial/I2C groups | boot order or firmware |
+| `/etc/mmdvm`, `/var/log/mmdvm`, `/var/lib/mmdvm` | unrelated services |
+| `/usr/local/bin` binaries | desktop/network configuration |
+| three systemd services | existing MMDVM/Pi-Star/WPSD (preflight refuses) |
+| Pi only: `config.txt` overlay/backup; serial getty disabled | boot config on x86 (none) |
+
+`uninstall.sh` removes the add-on files, stops the services, and restores the Pi boot
+config from its backup. It does **not** remove shared packages.
+
+## Upstream patches
+
+`build.sh` downloads content-pinned upstream tarballs and applies two patches:
+
+1. **`0001-ysfgateway-optional-mqtt.patch`** — upstream YSFGateway exits when no local
+   MQTT broker is available; the patch lets it continue without MQTT.
+2. **`0002-ysfgateway-ifstream-hosts.patch`** — upstream used `std::fstream` (read/write)
+   for the hosts file; a root-owned read-only `/etc/mmdvm/YSFHosts.json` caused `EACCES`.
+   The patch uses `std::ifstream`.
+
+`upstream.lock` records URLs and SHA-256 checksums. If upstream changes, the build fails;
+update the lock and re-test the patches deliberately.
+
+## Verify
 
 ```bash
 ./scripts/status.sh
 tail -n 20 /var/log/mmdvm/ysfgateway.log
 ```
 
-预期看到：
+Expected:
 
 ```text
 Loaded 1 YSF reflectors
 Linked to CN-C4FM-TG46001
 ```
 
-2. 电台设置：
+Radio settings for the tested setup:
 
-- 频率 = `FREQUENCY`（默认 438.8000 MHz）
-- 模式 **DN**（C4FM digital）
-- **无** CTCSS/亚音
+- frequency: the configured simplex frequency (example 438.8000 MHz)
+- mode **DN**
+- no CTCSS/tone
 - DG-ID 0
-- 不要按 WIRES-X（本方案是热点直连，不是 WIRES-X 按钮流程）
-- 先用假负载/合适天线，短按 PTT 测试
+- do not press WIRES-X (this is a direct hotspot, not a WIRES-X button flow)
 
-3. 对方呼号/链路会出现在 MMDVM-Host 日志和 OLED 上。
+## Troubleshooting
 
-## 排障
-
-| 现象 | 检查 |
+| Symptom | Check |
 |---|---|
-| 没有 `/dev/ttyAMA0` | `grep uart0-pi5 /boot/firmware/config.txt`；重启一次；确认没有其它服务占用 GPIO14/15。 |
-| MMDVM-Host 反复重启 | `journalctl -u mmdvmhost`；确认 UART 存在、HAT 插好、固件在运行（OLED/板子供电）。 |
-| 网关启动但没有 link | 看 `/var/log/mmdvm/ysfgateway.log` 是否有 `Load`/`Linked`；确认 `Startup` 是完整名；确认反射器地址/端口。 |
-| `Unable to load/parse JSON file` | 确认安装了带 ifstream 补丁的二进制；`build.sh` 是否成功。 |
-| 日志里有 MQTT connection refused | 正常：本方案不需要 MQTT broker；两个程序都设计为继续运行。 |
-| OLED 不亮 | `i2cdetect -y 1` 是否有 0x3C；确认 `oled-display.service`；检查 `/dev/i2c-1` 权限。 |
-| 中文显示方框 | 需要 DejaVu + DroidSansFallback 字体；README 预览使用混合字体渲染。 |
-| 服务起来但没射频 | HAT 频段/天线/驻波；先用假负载；确认 `FREQUENCY` 在 HAT 支持的波段内。 |
+| No modem serial device | `./scripts/preflight.sh`; use `MODEM_PORT=auto` with one device, or set the by-id path. |
+| No `/dev/ttyAMA0` on Pi 5 | `grep uart0-pi5 /boot/firmware/config.txt`; reboot once; check no other service owns GPIO14/15. |
+| Pi 4/3 UART not working | Confirm `enable_uart=1` and the chosen BT overlay; reboot; verify `/dev/ttyAMA0` mapping. Experimental. |
+| MMDVM-Host restart loop | `journalctl -u mmdvmhost`; check UART, HAT power/firmware, baud (115200 tested). |
+| Gateway up but no link | Check `Startup` is the full name; check reflector host/port; inspect the gateway log. |
+| `Unable to load/parse JSON file` | Confirm the ifstream patch was built and installed. |
+| MQTT connection refused in logs | Harmless; no MQTT broker is required. |
+| OLED blank | `ENABLE_OLED=auto`/`1`; `i2cdetect -y <bus>`; check I2C bus/address and permissions. |
+| CJK boxes on OLED | Install DejaVu + Droid fallback fonts; the preview uses mixed-font rendering. |
 
-## 卸载
+## Uninstall
 
 ```bash
-sudo ./scripts/uninstall.sh            # 停服务，删 add-on 文件，恢复 config.txt
-sudo ./scripts/uninstall.sh --dry-run  # 只打印，不改
-sudo ./scripts/uninstall.sh --purge    # 另外删除 /var/log/mmdvm 和 mmdvm 用户
+sudo ./scripts/uninstall.sh            # stop/remove add-on, restore Pi boot config
+sudo ./scripts/uninstall.sh --dry-run  # print actions only
+sudo ./scripts/uninstall.sh --purge    # also remove /var/log/mmdvm and mmdvm user
 ```
 
-默认**不会**卸载共享依赖包，也不会碰其它服务。`config.txt` 会从
-`config.txt.bak-mmdvm-addon` 恢复；如果备份丢失，脚本只会提示你手动移除
-`dtoverlay=uart0-pi5` 行，不会擅自改其它设置。
+On x86 there is no boot config or GPIO overlay to restore. Shared packages are kept.
 
-## 安全与隐私
+## Security and privacy
 
-- 不需要 DMR ID、BrandMeister 密码或任何 API token。
-- 不安装/运行 MQTT broker；两个程序的 MQTT 行为已处理。
-- `config.env`、日志、构建产物都在 `.gitignore` 里；公开示例用 `N0CALL`。
-- 反射器 hosts 是静态 JSON，不自动下载；请自己确认地址有效。
-- 运行 `sudo ./scripts/prepare-system.sh` / `install-services.sh` 前，先读一遍脚本。
+- No DMR ID, BrandMeister password, API token or MQTT broker is required.
+- `config.env`, logs and build artifacts are git-ignored; the public example is `N0CALL`.
+- The reflector hosts file is static; review the address yourself.
+- Read `prepare-system.sh` and `install-services.sh` before running them with sudo.
 
-## 限制
+## Limitations
 
-- 仅测试 Pi 5 + Ubuntu；Pi 4 / 其它发行版需要不同的 UART overlay，未验证。
-- 仅 YSF；D-Star/DMR/P25/NXDN/POCSAG/FM 在配置中全部关闭。
-- 不刷 HAT 固件；需要先自备可工作的 MMDVM_HS 固件。
-- 当前只支持一个静态 YSF 反射器条目；切换反射器请改 `config.env` 后重渲染/重启。
-- Live Caller 只有呼号 + 前缀推断国家，不含姓名/城市（YSF 帧没有这些字段）。
-- 不是 Pi-Star/WPSD 替代品；已有 MMDVM/Pi-Star/WPSD 的机器请勿直接安装。
+- Only the Pi 5 configuration was tested on real hardware.
+- Pi 4/3 support is experimental; x86 support is build/CI/documentation only.
+- YSF only; other MMDVM modes are disabled in the generated config.
+- One static reflector entry; changing reflectors requires editing and re-rendering.
+- The Live Caller shows callsign + prefix-inferred country, not a name/city database.
+- This is not a Pi-Star/WPSD replacement; don't install it over an existing MMDVM stack.
+- No firmware flashing and no precompiled binaries/release binaries.
 
-## 中国大陆访问 GitHub
+## GitHub access from mainland China
 
-GitHub 在中国大陆的访问可能不稳定；`git clone`/`git push` 可能被 TLS 重置或超时。
-如果遇到：
-
-- 重试或换时间段；
-- 用 GitHub 网页的 “Download ZIP”；
-- 或在能稳定访问的环境拉取后再拷贝；
-
-请遵守当地法律和网络服务条款，不要使用来源不明的代理服务。
+GitHub access from mainland China can be unstable; `git clone`/`git push` may be reset or
+time out. Retry at another time, use the GitHub web "Download ZIP", or fetch in an
+environment with stable access. Follow local laws and your network terms; do not use
+untrusted proxies.
 
 ## Credits / License
 
 - [G4KLX / MMDVMHost and YSFClients](https://github.com/g4klx) — GPLv2
 - CA6JAU MMDVM_HS firmware
-- WPSD 的 Live Caller 风格作为界面灵感（未复制其代码）
-- DejaVu Sans Mono、Droid Sans Fallback、Pillow — 作为系统依赖，不随仓库分发
+- WPSD's Live Caller style as UI inspiration (no WPSD code copied)
+- DejaVu Sans Mono, Droid Sans Fallback, Pillow — system dependencies, not bundled
 
-本仓库的脚本、配置模板和 OLED 代码以 **GPL-2.0** 发布；上游补丁同时受其原始
-GPLv2 条款约束。详见 [LICENSE](LICENSE)。
+This repository's scripts, templates and OLED code are released under **GPL-2.0**;
+upstream patches remain subject to their original GPLv2 terms. See [LICENSE](LICENSE).
 
-Author / maintainer: **BI2RIP**. 本项目与 Yaesu、G4KLX、CA6JAU、WPSD 无隶属关系。
+Author / maintainer: **BI2RIP**. Not affiliated with Yaesu, G4KLX, CA6JAU or WPSD.

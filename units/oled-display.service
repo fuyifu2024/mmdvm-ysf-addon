@@ -2,7 +2,6 @@
 Description=MMDVM YSF OLED live-caller display
 After=mmdvmhost.service ysfgateway.service
 Wants=mmdvmhost.service ysfgateway.service
-ConditionPathExists=/dev/i2c-1
 
 [Service]
 User=mmdvm

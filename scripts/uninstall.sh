@@ -5,8 +5,9 @@
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CONFIG_TXT=/boot/firmware/config.txt
-BACKUP="$CONFIG_TXT.bak-mmdvm-addon"
+# shellcheck source=lib.sh
+. "$REPO_DIR/scripts/lib.sh"
+PLATFORM="$(detect_platform)"
 DRY_RUN=0
 PURGE=0
 
@@ -37,12 +38,15 @@ say_run() {
 }
 
 echo "== MMDVM YSF add-on: uninstall =="
-for unit in ysfgateway mmdvmhost oled-display; do
+echo "platform: $PLATFORM"
+while IFS= read -r unit; do
 	if systemctl list-unit-files --no-legend "$unit.service" 2>/dev/null | grep -q .; then
 		say_run systemctl disable --now "$unit.service" 2>/dev/null || true
 		say_run rm -f "/etc/systemd/system/$unit.service"
 	fi
-done
+done < <(service_units)
+say_run rm -f /etc/systemd/system/mmdvmhost.service.d/20-port-group.conf
+say_run rmdir /etc/systemd/system/mmdvmhost.service.d 2>/dev/null || true
 say_run systemctl daemon-reload
 
 say_run rm -f /usr/local/bin/MMDVM-Host
@@ -66,18 +70,26 @@ else
 fi
 
 echo
-echo "== restoring boot config =="
-if [[ -f "$BACKUP" ]]; then
-	say_run cp "$BACKUP" "$CONFIG_TXT"
-	echo "restored $CONFIG_TXT from $BACKUP"
+echo "== restoring boot config (Pi only) =="
+if platform_is_pi; then
+	RESTORED=0
+	for backup in /boot/firmware/config.txt.bak-mmdvm-addon /boot/config.txt.bak-mmdvm-addon; do
+		if [[ -f "$backup" ]]; then
+			config="${backup%.bak-mmdvm-addon}"
+			echo "restoring $config from $backup (this reverts later edits to boot config)"
+			say_run cp "$backup" "$config"
+			RESTORED=1
+		fi
+	done
+	if (( RESTORED == 0 )); then
+		echo "WARNING: no MMDVM boot-config backup found." >&2
+		echo "If needed, remove only the lines added by this add-on manually." >&2
+	fi
+	if command -v dtoverlay >/dev/null 2>&1 && dtoverlay -l 2>/dev/null | grep -q 'uart0-pi5'; then
+		say_run dtoverlay -r uart0-pi5 2>/dev/null || true
+	fi
 else
-	echo "WARNING: backup not found: $BACKUP" >&2
-	echo "Remove this line from $CONFIG_TXT manually if it was added by this add-on:" >&2
-	echo "  dtoverlay=uart0-pi5" >&2
-fi
-
-if command -v dtoverlay >/dev/null 2>&1 && dtoverlay -l 2>/dev/null | grep -q 'uart0-pi5'; then
-	say_run dtoverlay -r uart0-pi5 2>/dev/null || true
+	echo "non-Pi platform: no /boot config or GPIO overlay was installed."
 fi
 
 echo

@@ -23,6 +23,19 @@ jobs:
         run: python3 -m py_compile scripts/render_configs.py oled/oled_display.py
       - name: Validate example configuration
         run: python3 scripts/render_configs.py --config config.example.env --check --quiet
+      - name: x86-style validation (no hardware)
+        run: |
+          cp config.example.env /tmp/x86.env
+          sed -i 's/^MODEM_PORT=.*/MODEM_PORT=\/dev\/ttyUSB0/; s/^ENABLE_OLED=.*/ENABLE_OLED=0/' /tmp/x86.env
+          MMDVM_PLATFORM=x86 python3 scripts/render_configs.py --config /tmp/x86.env --check
+      - name: Render fixture without hardware
+        run: |
+          cp config.example.env /tmp/fixture.env
+          sed -i 's/^MODEM_PORT=.*/MODEM_PORT=\/dev\/null/; s/^ENABLE_OLED=.*/ENABLE_OLED=0/' /tmp/fixture.env
+          python3 scripts/render_configs.py --config /tmp/fixture.env --output /tmp/v02-build --quiet
+          grep -qx 'UARTPort=/dev/null' /tmp/v02-build/etc/MMDVM-Host.ini
+          grep -qx 'UARTSpeed=115200' /tmp/v02-build/etc/MMDVM-Host.ini
+          grep -qx 'ENABLE_OLED=0' /tmp/v02-build/etc/system.env
       - name: Render OLED preview
         run: |
           python3 oled/oled_display.py --preview /tmp/oled.png \

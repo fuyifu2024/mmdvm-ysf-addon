@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """WPSD-style live-caller OLED display for an MMDVM YSF hotspot.
 
-The 0.96" SSD1306 on this MMDVM_HS_Hat is on the Pi I2C-1 bus at 0x3C.
-The STM32 firmware does not drive it, so the host draws it directly.
+The 0.96" SSD1306 on this MMDVM_HS_Hat is on the configured I2C bus
+(Pi I2C-1 at 0x3C by default).  The STM32 firmware does not drive it, so the
+host draws it directly.
 
 Display:
   header bar:  LIVE CALLER            <your call sign>
@@ -10,9 +11,10 @@ Display:
   region line: country inferred from the call-sign prefix + NET/RF + BER
   bottom:      link dot, reflector number, frequency, local clock
 
-OWN_CALL, REFLECTOR_ID and FREQUENCY_LABEL are read from the environment
-(systemd EnvironmentFile), with --own-call/--reflector/--frequency overrides.
---preview renders a PNG without opening I2C and is safe for CI/docs.
+OWN_CALL, REFLECTOR_ID, FREQUENCY_LABEL, I2C_BUS and I2C_ADDRESS are read
+from the environment (systemd EnvironmentFile), with --own-call/--reflector/
+--frequency/--bus/--address overrides. --preview renders a PNG without opening
+I2C and is safe for CI/docs.
 
 YSF frames carry only the call sign (no name/city), so the region comes from
 an offline call-prefix table.
@@ -35,9 +37,18 @@ from PIL import Image, ImageDraw, ImageFont
 WIDTH = 128
 HEIGHT = 64
 I2C_SLAVE = 0x0703
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, str(default)), 0)
+    except ValueError:
+        return default
+
+
 OWN_CALL = os.environ.get("OWN_CALL", "N0CALL").upper()
 REFLECTOR = os.environ.get("REFLECTOR_ID", "46001")
 FREQUENCY = os.environ.get("FREQUENCY_LABEL", "438.800")
+DEFAULT_I2C_BUS = _env_int("I2C_BUS", 1)
+DEFAULT_I2C_ADDRESS = _env_int("I2C_ADDRESS", 0x3C)
 DEFAULT_LOG_DIR = Path(os.environ.get("MMDVM_LOG_DIR", "/var/log/mmdvm"))
 FONT_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"
 FONT_REGULAR = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"
@@ -417,8 +428,11 @@ def main() -> int:
     global OWN_CALL, REFLECTOR, FREQUENCY
 
     parser = argparse.ArgumentParser(description="MMDVM YSF live-caller OLED")
-    parser.add_argument("--bus", type=int, default=1)
-    parser.add_argument("--address", type=lambda x: int(x, 0), default=0x3C)
+    parser.add_argument("--bus", type=int, default=DEFAULT_I2C_BUS,
+                        help="I2C bus number (default from I2C_BUS)")
+    parser.add_argument("--address", type=lambda x: int(x, 0),
+                        default=DEFAULT_I2C_ADDRESS,
+                        help="I2C address (default from I2C_ADDRESS)")
     parser.add_argument("--contrast", type=lambda x: int(x, 0), default=0xCF)
     parser.add_argument("--gateway-log", type=Path,
                         default=DEFAULT_LOG_DIR / "ysfgateway.log")

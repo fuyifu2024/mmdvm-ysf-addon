@@ -25,8 +25,8 @@ Callsign=@CALLSIGN@
 
 [Modem]
 Protocol=uart
-UARTPort=/dev/ttyAMA0
-UARTSpeed=115200
+UARTPort=@MODEM_PORT@
+UARTSpeed=@MODEM_BAUD@
 RXFrequency=@FREQUENCY_HZ@
 TXFrequency=@FREQUENCY_HZ@
 TXInvert=1

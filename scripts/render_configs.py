@@ -1,17 +1,24 @@
 #!/usr/bin/env python3
 """Validate config.env and render MMDVM/YSFGateway/OLED configuration.
 
-This script deliberately does not source the env file through a shell.  It
-parses simple KEY=value lines, validates every value, and writes only inside
-the requested build directory.  Root-owned installation scripts later copy the
-generated files into /etc/mmdvm.
+The renderer is deterministic for a given machine state.  It never sources the
+env file through a shell and only writes inside the requested build directory.
+
+Hardware notes:
+  * MODEM_PORT=auto resolves to one serial device.  If several are present the
+    renderer refuses to guess and asks for an explicit /dev/... path.
+  * ENABLE_OLED=auto is deliberately deferred to install-services.sh, which
+    runs as root and probes the configured I2C bus.  --check therefore never
+    requires an OLED or a modem, which keeps CI hardware-free.
 """
 
 from __future__ import annotations
 
 import argparse
 import ast
+import glob
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -23,6 +30,14 @@ DEFAULT_OUTPUT = REPO / "build"
 
 PLACEHOLDER_RE = re.compile(r"@[A-Z0-9_]+@")
 KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+SERIAL_PATTERNS = (
+    "/dev/serial/by-id/*",
+    "/dev/ttyAMA0",
+    "/dev/serial0",
+    "/dev/ttyUSB*",
+    "/dev/ttyACM*",
+    "/dev/ttySC*",
+)
 
 
 class ConfigError(Exception):
@@ -65,6 +80,83 @@ def require(values: dict[str, str], key: str) -> str:
     if not value:
         raise ConfigError(f"missing required key {key}")
     return value
+
+
+def detect_platform() -> str:
+    override = os.environ.get("MMDVM_PLATFORM")
+    if override:
+        return override
+    model = ""
+    try:
+        model = Path("/proc/device-tree/model").read_bytes().replace(b"\0", b"").decode(
+            "utf-8", "replace"
+        )
+    except OSError:
+        pass
+    if "Raspberry Pi 5" in model:
+        return "pi5"
+    if any(token in model for token in (
+        "Raspberry Pi 4", "Raspberry Pi 3", "Raspberry Pi Zero 2",
+        "Compute Module 4", "Compute Module 3",
+    )):
+        return "pi_legacy"
+    if "Raspberry Pi" in model:
+        return "pi_other"
+    if model:
+        return "arm-other"
+    machine = os.uname().machine
+    if machine in ("x86_64", "amd64", "i386", "i486", "i586", "i686"):
+        return "x86"
+    return "other"
+
+
+def modem_candidates() -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for pattern in SERIAL_PATTERNS:
+        for path in sorted(glob.glob(pattern)):
+            real = str(Path(path).resolve())
+            if real in seen:
+                continue
+            seen.add(real)
+            result.append(path)
+    return result
+
+
+def resolve_modem_port(requested: str, check: bool) -> str | None:
+    if requested != "auto":
+        if not Path(requested).exists():
+            message = (
+                f"serial device does not exist: {requested}; "
+                "connect the modem or set MODEM_PORT to the correct /dev/... path"
+            )
+            if check:
+                print(f"warning: {message}", file=sys.stderr)
+                return requested
+            raise ConfigError(message)
+        return requested
+
+    candidates = modem_candidates()
+    if len(candidates) == 1:
+        return candidates[0]
+    if not candidates:
+        message = (
+            "no serial modem found; connect a USB/GPIO modem or set MODEM_PORT "
+            "explicitly"
+        )
+        if check:
+            print(f"warning: {message}", file=sys.stderr)
+            return None
+        raise ConfigError(message)
+
+    message = (
+        "multiple serial devices found; refusing to guess. Set MODEM_PORT to one of: "
+        + ", ".join(candidates)
+    )
+    if check:
+        print(f"warning: {message}", file=sys.stderr)
+        return None
+    raise ConfigError(message)
 
 
 def validate(values: dict[str, str]) -> dict[str, object]:
@@ -136,6 +228,41 @@ def validate(values: dict[str, str]) -> dict[str, object]:
         if "\n" in text or "\r" in text:
             raise ConfigError(f"{label} must be a single line")
 
+    modem_port = values.get("MODEM_PORT", "auto").strip() or "auto"
+    if modem_port != "auto":
+        if not modem_port.startswith("/dev/") or re.search(r"\s", modem_port):
+            raise ConfigError("MODEM_PORT must be 'auto' or an absolute /dev/ path")
+
+    try:
+        modem_baud = int(values.get("MODEM_BAUD", "115200").strip() or "115200")
+    except ValueError as exc:
+        raise ConfigError("MODEM_BAUD must be a number") from exc
+    if not 1200 <= modem_baud <= 921600:
+        raise ConfigError("MODEM_BAUD must be between 1200 and 921600")
+
+    enable_oled_raw = values.get("ENABLE_OLED", "auto").strip().lower() or "auto"
+    oled_aliases = {
+        "auto": "auto", "1": "1", "yes": "1", "true": "1", "on": "1",
+        "0": "0", "no": "0", "false": "0", "off": "0",
+    }
+    if enable_oled_raw not in oled_aliases:
+        raise ConfigError("ENABLE_OLED must be auto, 1/yes, or 0/no")
+    enable_oled = oled_aliases[enable_oled_raw]
+
+    try:
+        i2c_bus = int(values.get("I2C_BUS", "1").strip() or "1")
+    except ValueError as exc:
+        raise ConfigError("I2C_BUS must be a number") from exc
+    if not 0 <= i2c_bus <= 20:
+        raise ConfigError("I2C_BUS must be between 0 and 20")
+
+    try:
+        i2c_address = int(values.get("I2C_ADDRESS", "0x3C").strip() or "0x3C", 0)
+    except ValueError as exc:
+        raise ConfigError("I2C_ADDRESS must be a number such as 0x3C") from exc
+    if not 0x03 <= i2c_address <= 0x77:
+        raise ConfigError("I2C_ADDRESS must be a 7-bit address between 0x03 and 0x77")
+
     return {
         "callsign": callsign,
         "suffix": suffix,
@@ -151,6 +278,11 @@ def validate(values: dict[str, str]) -> dict[str, object]:
         "port": port,
         "hotspot_name": hotspot_name,
         "hotspot_desc": hotspot_desc,
+        "modem_port": modem_port,
+        "modem_baud": modem_baud,
+        "enable_oled": enable_oled,
+        "i2c_bus": i2c_bus,
+        "i2c_address": i2c_address,
     }
 
 
@@ -171,7 +303,7 @@ def expand(text: str, mapping: dict[str, str]) -> str:
     return result
 
 
-def render(values: dict[str, object], output: Path) -> list[Path]:
+def render(values: dict[str, object], output: Path, platform: str) -> list[Path]:
     mapping = {
         "CALLSIGN": str(values["callsign"]),
         "SUFFIX": str(values["suffix"]),
@@ -180,6 +312,8 @@ def render(values: dict[str, object], output: Path) -> list[Path]:
         "REFLECTOR_STARTUP": str(values["startup"]),
         "HOTSPOT_NAME": str(values["hotspot_name"]),
         "HOTSPOT_DESC": str(values["hotspot_desc"]),
+        "MODEM_PORT": str(values["modem_port"]),
+        "MODEM_BAUD": str(values["modem_baud"]),
     }
 
     etc = output / "etc"
@@ -219,9 +353,22 @@ def render(values: dict[str, object], output: Path) -> list[Path]:
         f"OWN_CALL={values['callsign']}\n"
         f"REFLECTOR_ID={values['reflector_id']}\n"
         f"FREQUENCY_LABEL={values['frequency_label']}\n"
+        f"I2C_BUS={values['i2c_bus']}\n"
+        f"I2C_ADDRESS=0x{int(values['i2c_address']):02X}\n"
     )
     (etc / "oled.env").write_text(oled_env, encoding="utf-8")
     written.append(etc / "oled.env")
+
+    system_env = (
+        f"MODEM_PORT={values['modem_port']}\n"
+        f"MODEM_BAUD={values['modem_baud']}\n"
+        f"ENABLE_OLED={values['enable_oled']}\n"
+        f"I2C_BUS={values['i2c_bus']}\n"
+        f"I2C_ADDRESS=0x{int(values['i2c_address']):02X}\n"
+        f"PLATFORM={platform}\n"
+    )
+    (etc / "system.env").write_text(system_env, encoding="utf-8")
+    written.append(etc / "system.env")
 
     return written
 
@@ -233,15 +380,34 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT,
                         help="build output directory (default: repo/build)")
     parser.add_argument("--check", action="store_true",
-                        help="validate only; do not write files")
+                        help="validate only; no hardware required and no files written")
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
 
     try:
         values = validate(parse_env(args.config))
+        platform = detect_platform()
+        resolved_port = resolve_modem_port(str(values["modem_port"]), args.check)
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+
+    if resolved_port is not None:
+        values["modem_port"] = resolved_port
+
+    if not args.quiet:
+        print(f"platform: {platform}")
+        print(
+            f"config OK: {values['callsign']} / {values['frequency_label']} MHz / "
+            f"{values['startup']} ({values['host']}:{values['port']})"
+        )
+        print(f"modem: {values['modem_port']} @ {values['modem_baud']} baud")
+        print(
+            f"OLED: {values['enable_oled']} (I2C bus {values['i2c_bus']}, "
+            f"address 0x{int(values['i2c_address']):02X})"
+        )
+        if values["enable_oled"] == "auto":
+            print("      auto OLED probing happens during install (as root)")
 
     if str(values["callsign"]) == "N0CALL" and not args.quiet:
         print("warning: CALLSIGN is N0CALL; edit config.env before transmitting.",
@@ -253,18 +419,15 @@ def main() -> int:
             "coordinated reason.",
             file=sys.stderr,
         )
-
-    if not args.quiet:
-        print(
-            f"config OK: {values['callsign']} / {values['frequency_label']} MHz / "
-            f"{values['startup']} ({values['host']}:{values['port']})"
-        )
+    if int(values["modem_baud"]) != 115200 and not args.quiet:
+        print("warning: 115200 is the tested MMDVM_HS baud rate; "
+              "other values are experimental.", file=sys.stderr)
 
     if args.check:
         return 0
 
     try:
-        written = render(values, args.output)
+        written = render(values, args.output, platform)
     except (ConfigError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
