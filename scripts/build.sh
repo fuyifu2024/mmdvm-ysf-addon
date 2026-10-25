@@ -174,7 +174,12 @@ fi
 if (( BUILD_DSTAR )); then
 	echo "== building DStarGateway (make -j$JOBS) =="
 	cd "$SRC/DStarGateway"
-	make -j"$JOBS" DStarGateway/dstargateway > "$BUILD/build-dstargateway.log" 2>&1 || {
+	# GCC 14+ treats the unchecked write() in DStarGateway's Daemon.cpp as an
+	# error under its own -Werror.  Keep other warnings fatal, but do not let
+	# this known upstream warning break the build.
+	DSTAR_CPPFLAGS="-W -O3 -Wall -Werror -Wno-error=unused-result -std=c++17"
+	make -j"$JOBS" DStarGateway/dstargateway CPPFLAGS="$DSTAR_CPPFLAGS" \
+		> "$BUILD/build-dstargateway.log" 2>&1 || {
 		tail -n 40 "$BUILD/build-dstargateway.log" >&2
 		die "DStarGateway build failed (log: $BUILD/build-dstargateway.log)"
 	}
