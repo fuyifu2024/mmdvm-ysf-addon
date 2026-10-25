@@ -80,8 +80,12 @@ done
 [[ -f /usr/include/mosquitto.h ]] || die "libmosquitto-dev is missing (run sudo ./scripts/prepare-system.sh)"
 [[ -f /usr/include/nlohmann/json.hpp ]] || die "nlohmann-json3-dev is missing (run sudo ./scripts/prepare-system.sh)"
 if (( BUILD_DSTAR )); then
-	[[ -f /usr/include/curl/curl.h ]] || die "libcurl4-openssl-dev is missing (run sudo ./scripts/prepare-system.sh)"
-	[[ -f /usr/include/boost/version.hpp ]] || die "libboost-dev is missing (run sudo ./scripts/prepare-system.sh)"
+	# Multiarch distros put curl.h under /usr/include/<triplet>/curl, so probe
+	# with the compiler instead of assuming a fixed header path.
+	printf '#include <curl/curl.h>\n' | c++ -E -x c++ - >/dev/null 2>&1 \
+		|| die "libcurl4-openssl-dev is missing (run sudo ./scripts/prepare-system.sh)"
+	printf '#include <boost/version.hpp>\n' | c++ -E -x c++ - >/dev/null 2>&1 \
+		|| die "libboost-dev is missing (run sudo ./scripts/prepare-system.sh)"
 fi
 
 echo "build modes: YSF=on DMR=$([[ $BUILD_DMR == 1 ]] && echo on || echo off) D-Star=$([[ $BUILD_DSTAR == 1 ]] && echo on || echo off)"
