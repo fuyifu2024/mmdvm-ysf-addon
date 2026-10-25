@@ -71,7 +71,33 @@ UART、USB 枚举、I2C、systemd 安装、射频或反射器 link。只有下�
 ```bash
 git clone https://github.com/fuyifu2024/mmdvm-ysf-addon.git
 cd mmdvm-ysf-addon
+./setup.sh
+```
 
+推荐直接用 `setup.sh`。它会：
+
+- 没有 `config.env` 时交互询问呼号、频率、`MODEM_PORT`
+- 拒绝 `N0CALL`（必须填真实呼号）
+- 先跑 preflight，再用 sudo 准备 UART/依赖/用户组
+- 渲染配置并构建上游（内存低时自动用 `JOBS=1`）
+- 安装并启动服务，最后打印状态
+
+常用选项：
+
+```bash
+./setup.sh --dry-run          # 只打印计划，不修改
+./setup.sh --yes              # 跳过最后确认
+./setup.sh --non-interactive  # 要求已编辑好 config.env，不交互
+./setup.sh --rebuild          # 强制重新编译
+```
+
+Pi 4/3 可能提示重启；重启后重新运行 `./setup.sh`，配置和系统准备会保留。x86 没找到
+串口时，接上 USB MMDVM 调制解调器再重跑。`prepare-system.sh` 不会重启无关服务；
+`install-services.sh` 只重启本 add-on 的三个服务。
+
+### 手工 / 分步安装
+
+```bash
 cp config.example.env config.env
 $EDITOR config.env          # CALLSIGN、FREQUENCY、MODEM_PORT、反射器...
 
@@ -94,8 +120,7 @@ sudo make install
 make status
 ```
 
-如果 `prepare-system.sh` 提示 UART 还没准备好，重启一次再继续。`prepare-system.sh`
-不会重启无关服务；`install-services.sh` 只重启本 add-on 的三个服务。
+如果 `prepare-system.sh` 提示 UART 还没准备好，重启一次再继续。
 
 ## 配置
 

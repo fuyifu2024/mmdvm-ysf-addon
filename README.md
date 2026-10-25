@@ -76,7 +76,34 @@ calling area and is **not** recommended as a hotspot default; see the frequency 
 ```bash
 git clone https://github.com/fuyifu2024/mmdvm-ysf-addon.git
 cd mmdvm-ysf-addon
+./setup.sh
+```
 
+`setup.sh` is the recommended path. It:
+
+- prompts for callsign, frequency and `MODEM_PORT` if `config.env` is missing
+- refuses `N0CALL`
+- runs preflight, then prepares UART/dependencies/groups with sudo
+- renders configs and builds upstream (automatically uses `JOBS=1` when memory is low)
+- installs/starts the services and prints status
+
+Useful options:
+
+```bash
+./setup.sh --dry-run          # show the plan; change nothing
+./setup.sh --yes              # skip the final confirmation
+./setup.sh --non-interactive  # require a pre-edited config.env
+./setup.sh --rebuild          # force a rebuild
+```
+
+On Pi 4/3 setup may ask you to reboot; reboot and rerun `./setup.sh`; the configuration
+and system preparation are kept. On x86, connect the USB MMDVM modem and rerun if no
+serial device is found. `prepare-system.sh` does not restart unrelated services;
+`install-services.sh` only restarts the three add-on services.
+
+### Manual / advanced quick start
+
+```bash
 cp config.example.env config.env
 $EDITOR config.env          # CALLSIGN, FREQUENCY, MODEM_PORT, reflector...
 
@@ -100,8 +127,6 @@ make status
 ```
 
 If `prepare-system.sh` reports that the UART is not ready yet, reboot once and continue.
-`prepare-system.sh` does not restart unrelated services; `install-services.sh` only
-restarts the three add-on services.
 
 ## Configuration
 
