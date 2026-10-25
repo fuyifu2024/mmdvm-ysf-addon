@@ -1,20 +1,29 @@
 #!/usr/bin/env python3
-"""WPSD-style live-caller OLED display for an MMDVM YSF hotspot.
+"""WPSD-style live-caller OLED display for an MMDVM hotspot.
 
-The 0.96" SSD1306 on this MMDVM_HS_Hat is on the configured I2C bus
-(Pi I2C-1 at 0x3C by default).  The STM32 firmware does not drive it, so the
-host draws it directly.
+Supports the common I2C OLED panels found on hotspot HATs:
 
-Display:
+  controller  SSD1306 / SSD1309 / SSD1315 (aliases) and SH1106
+  size        128x64 (0.96"), 128x32 (0.91") and 64x48 (small)
+  rotation    normal or 180 degrees (some HATs mount the panel upside down)
+
+The STM32 firmware does not drive the panel, so the host draws it directly.
+The default is the tested 128x64 SSD1306 at I2C-1 0x3C; set OLED_CONTROLLER,
+OLED_SIZE, OLED_ROTATE and OLED_CONTRAST in config.env for other panels.
+
+Display (128x64):
   header bar:  LIVE CALLER            <your call sign>
   main:        callsign of the current/last speaker
   region line: country inferred from the call-sign prefix + NET/RF + BER
   bottom:      link dot, reflector number, frequency, local clock
 
-OWN_CALL, REFLECTOR_ID, FREQUENCY_LABEL, I2C_BUS and I2C_ADDRESS are read
-from the environment (systemd EnvironmentFile), with --own-call/--reflector/
---frequency/--bus/--address overrides. --preview renders a PNG without opening
-I2C and is safe for CI/docs.
+128x32 and 64x48 use a compact three-line layout (header/call/region).
+
+OWN_CALL, REFLECTOR_ID, FREQUENCY_LABEL, I2C_BUS, I2C_ADDRESS and the OLED_*
+settings are read from the environment (systemd EnvironmentFile), with
+--own-call/--reflector/--frequency/--bus/--address/--controller/--size/
+--rotate/--contrast overrides. --preview renders a PNG without opening I2C and
+is safe for CI/docs.
 
 YSF frames carry only the call sign (no name/city), so the region comes from
 an offline call-prefix table.
@@ -37,6 +46,8 @@ from PIL import Image, ImageDraw, ImageFont
 WIDTH = 128
 HEIGHT = 64
 I2C_SLAVE = 0x0703
+
+
 def _env_int(name: str, default: int) -> int:
     try:
         return int(os.environ.get(name, str(default)), 0)
@@ -49,38 +60,62 @@ REFLECTOR = os.environ.get("REFLECTOR_ID", "46001")
 FREQUENCY = os.environ.get("FREQUENCY_LABEL", "438.800")
 DEFAULT_I2C_BUS = _env_int("I2C_BUS", 1)
 DEFAULT_I2C_ADDRESS = _env_int("I2C_ADDRESS", 0x3C)
+DEFAULT_CONTROLLER = os.environ.get("OLED_CONTROLLER", "ssd1306").strip().lower() or "ssd1306"
+DEFAULT_SIZE = os.environ.get("OLED_SIZE", "128x64").strip().lower() or "128x64"
+DEFAULT_ROTATE = _env_int("OLED_ROTATE", 0)
+DEFAULT_CONTRAST = _env_int("OLED_CONTRAST", 0xCF)
 DEFAULT_LOG_DIR = Path(os.environ.get("MMDVM_LOG_DIR", "/var/log/mmdvm"))
+SIZE_MAP = {"128x64": (128, 64), "128x32": (128, 32), "64x48": (64, 48)}
+CONTROLLER_ALIASES = {
+    "auto": "ssd1306", "ssd1306": "ssd1306", "ssd1309": "ssd1306",
+    "ssd1315": "ssd1306", "sh1106": "sh1106",
+}
 FONT_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"
 FONT_REGULAR = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"
 FONT_CJK = "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf"
 CALLER_HOLD_SECONDS = 90
 
 
-class SSD1306:
-    def __init__(self, bus: int = 1, address: int = 0x3C, contrast: int = 0xCF):
+class I2CDisplay:
+    def __init__(self, bus: int = 1, address: int = 0x3C, contrast: int = 0xCF,
+                 controller: str = "ssd1306", width: int = 128, height: int = 64,
+                 rotate: int = 0):
         self.address = address
+        self.controller = controller
+        self.width = width
+        self.height = height
+        self.rotate = rotate
+        self.offset = 2 if controller == "sh1106" else 0
         self.fd = os.open(f"/dev/i2c-{bus}", os.O_RDWR)
         fcntl.ioctl(self.fd, I2C_SLAVE, address)
-        self._commands([
-            0xAE,
-            0xD5, 0x80,
-            0xA8, HEIGHT - 1,
-            0xD3, 0x00,
-            0x40,
-            0x8D, 0x14,
-            0x20, 0x00,
-            0xA1,
-            0xC8,
-            0xDA, 0x12,
-            0x81, contrast,
-            0xD9, 0xF1,
-            0xDB, 0x40,
-            0xA4,
-            0xA6,
-            0x2E,
-            0xAF,
-        ])
+        self._init(contrast)
         self.clear()
+
+    def _init(self, contrast: int):
+        sequence = [0xAE, 0xD5, 0x80, 0xA8, self.height - 1, 0xD3, 0x00, 0x40]
+        if self.controller == "sh1106":
+            sequence += [
+                0xAD, 0x8B,
+                0xA1, 0xC8,
+                0xDA, 0x12,
+                0x81, contrast,
+                0xD9, 0xF1,
+                0xDB, 0x40,
+                0xA4, 0xA6, 0x2E, 0xAF,
+            ]
+        else:
+            com_pins = 0x02 if self.height == 32 else 0x12
+            sequence += [
+                0x8D, 0x14,
+                0x20, 0x00,
+                0xA1, 0xC8,
+                0xDA, com_pins,
+                0x81, contrast,
+                0xD9, 0xF1,
+                0xDB, 0x40,
+                0xA4, 0xA6, 0x2E, 0xAF,
+            ]
+        self._commands(sequence)
 
     def _write(self, payload):
         os.write(self.fd, bytes(payload))
@@ -88,27 +123,45 @@ class SSD1306:
     def _commands(self, commands):
         self._write([0x00] + list(commands))
 
-    def clear(self):
-        self._commands([0x21, 0, WIDTH - 1, 0x22, 0, (HEIGHT // 8) - 1])
-        blank = bytes(32)
-        for _ in range(WIDTH * HEIGHT // 8 // 32):
-            self._write([0x40] + list(blank))
-
-    def show(self, image: Image.Image):
+    def _framebuffer(self, image: Image.Image) -> bytearray:
         image = image.convert("1")
+        if image.size != (self.width, self.height):
+            image = image.resize((self.width, self.height))
+        if self.rotate == 180:
+            image = image.transpose(Image.ROTATE_180)
         pixels = image.load()
-        buffer = bytearray(WIDTH * HEIGHT // 8)
-        for y in range(HEIGHT):
+        buffer = bytearray(self.width * self.height // 8)
+        for y in range(self.height):
             page = y // 8
             bit = 1 << (y % 8)
-            base = page * WIDTH
-            for x in range(WIDTH):
+            base = page * self.width
+            for x in range(self.width):
                 if pixels[x, y]:
                     buffer[base + x] |= bit
+        return buffer
 
-        self._commands([0x21, 0, WIDTH - 1, 0x22, 0, (HEIGHT // 8) - 1])
-        for offset in range(0, len(buffer), 32):
-            self._write([0x40] + list(buffer[offset:offset + 32]))
+    def show(self, image: Image.Image):
+        buffer = self._framebuffer(image)
+        if self.controller == "sh1106":
+            # SH1106 uses page addressing and has a 132-column RAM; most
+            # 1.3" modules expose the visible 128 columns at offset 2.
+            for page in range(self.height // 8):
+                column = self.offset
+                self._commands([
+                    0xB0 + page,
+                    0x00 + (column & 0x0F),
+                    0x10 + ((column >> 4) & 0x0F),
+                ])
+                chunk = buffer[page * self.width:(page + 1) * self.width]
+                for offset in range(0, len(chunk), 32):
+                    self._write([0x40] + list(chunk[offset:offset + 32]))
+        else:
+            self._commands([0x21, 0, self.width - 1, 0x22, 0, (self.height // 8) - 1])
+            for offset in range(0, len(buffer), 32):
+                self._write([0x40] + list(buffer[offset:offset + 32]))
+
+    def clear(self):
+        self.show(Image.new("1", (self.width, self.height), 0))
 
     def close(self):
         try:
@@ -383,57 +436,105 @@ def render(status: dict, fonts) -> Image.Image:
     draw = ImageDraw.Draw(image)
 
     active = status["active"] and status["speaker"]
-    header = "LIVE CALLER" if active else "STATION IDLE"
-    draw.rectangle((0, 0, WIDTH - 1, 11), fill=1)
-    draw.text((2, 0), header, font=font_header, fill=0)
+
+    if HEIGHT >= 60:
+        header = "LIVE CALLER" if active else "STATION IDLE"
+        draw.rectangle((0, 0, WIDTH - 1, 11), fill=1)
+        draw.text((2, 0), header, font=font_header, fill=0)
+        own_w = draw.textlength(OWN_CALL, font=font_header)
+        draw.text((WIDTH - 3 - own_w, 0), OWN_CALL, font=font_header, fill=0)
+
+        if active:
+            speaker = status["speaker"]
+            big = _fit_font(draw, speaker, FONT_BOLD, (20, 18, 16, 14, 12))
+            _center_text(draw, speaker, big, 13)
+
+            region = _region(speaker)
+            detail = status["source"]
+            if status["source"] == "RF" and status["ber"] is not None:
+                detail += f" {status['ber']:.1f}%"
+            _draw_mixed(draw, region, detail, font_cjk, font_mid, 43)
+        else:
+            _center_text(draw, "STANDBY", font_big, 17)
+            _center_text(draw, "MMDVM_HS v1.5.2", font_small, 39)
+
+        clock = datetime.now().strftime("%H:%M:%S")
+        clock_w = draw.textlength(clock, font=font_bottom)
+        if not status["gateway_running"]:
+            link_text = f"{REFLECTOR} OFFLINE"
+            linked = False
+        elif status["linked"]:
+            link_text = f"{REFLECTOR} {FREQUENCY}"
+            linked = True
+        else:
+            link_text = f"{REFLECTOR} LINKING"
+            linked = False
+
+        draw.ellipse((2, 54, 6, 58), fill=1 if linked else 0,
+                     outline=1 if not linked else None)
+        draw.text((9, 51), link_text, font=font_bottom, fill=1)
+        draw.text((WIDTH - 3 - clock_w, 51), clock, font=font_bottom, fill=1)
+        return image
+
+    # Compact 128x32 and 64x48 layouts.
+    bar_h = 9
+    draw.rectangle((0, 0, WIDTH - 1, bar_h - 1), fill=1)
+    label = "LIVE" if active else "IDLE"
+    draw.text((1, 0), label, font=font_header, fill=0)
     own_w = draw.textlength(OWN_CALL, font=font_header)
-    draw.text((WIDTH - 3 - own_w, 0), OWN_CALL, font=font_header, fill=0)
+    draw.text((WIDTH - 2 - own_w, 0), OWN_CALL, font=font_header, fill=0)
 
     if active:
         speaker = status["speaker"]
-        big = _fit_font(draw, speaker, FONT_BOLD, (20, 18, 16, 14, 12))
-        _center_text(draw, speaker, big, 13)
-
+        big = _fit_font(draw, speaker, FONT_BOLD, (12, 11, 10, 9, 8), WIDTH - 2)
+        _center_text(draw, speaker, big, bar_h)
         region = _region(speaker)
         detail = status["source"]
         if status["source"] == "RF" and status["ber"] is not None:
             detail += f" {status['ber']:.1f}%"
-        _draw_mixed(draw, region, detail, font_cjk, font_mid, 43)
+        region_y = 26 if HEIGHT <= 32 else 28
+        _draw_mixed(draw, region, detail, font_cjk, font_mid, region_y)
     else:
-        _center_text(draw, "STANDBY", font_big, 17)
-        _center_text(draw, "MMDVM_HS v1.5.2", font_small, 39)
+        _center_text(draw, "STANDBY", font_big, bar_h)
+        if HEIGHT <= 32:
+            _center_text(draw, f"{REFLECTOR} {FREQUENCY}", font_bottom, HEIGHT - 8)
+        else:
+            _center_text(draw, FREQUENCY, font_bottom, 24)
 
-    # Bottom: link dot + reflector/frequency + local clock.
-    clock = datetime.now().strftime("%H:%M:%S")
-    clock_w = draw.textlength(clock, font=font_bottom)
-    if not status["gateway_running"]:
-        link_text = f"{REFLECTOR} OFFLINE"
-        linked = False
-    elif status["linked"]:
-        link_text = f"{REFLECTOR} {FREQUENCY}"
-        linked = True
-    else:
-        link_text = f"{REFLECTOR} LINKING"
-        linked = False
-
-    draw.ellipse((2, 54, 6, 58), fill=1 if linked else 0,
-                 outline=1 if not linked else None)
-    draw.text((9, 51), link_text, font=font_bottom, fill=1)
-    draw.text((WIDTH - 3 - clock_w, 51), clock, font=font_bottom, fill=1)
+    if HEIGHT >= 40:
+        short_clock = datetime.now().strftime("%H:%M")
+        if not status["gateway_running"]:
+            linked = False
+        else:
+            linked = status["linked"]
+        draw.ellipse((1, HEIGHT - 7, 4, HEIGHT - 4), fill=1 if linked else 0,
+                     outline=1 if not linked else None)
+        draw.text((6, HEIGHT - 9), REFLECTOR, font=font_bottom, fill=1)
+        draw.text((WIDTH - 2 - draw.textlength(short_clock, font=font_bottom),
+                   HEIGHT - 9), short_clock, font=font_bottom, fill=1)
 
     return image
 
 
 def main() -> int:
-    global OWN_CALL, REFLECTOR, FREQUENCY
+    global OWN_CALL, REFLECTOR, FREQUENCY, WIDTH, HEIGHT
 
-    parser = argparse.ArgumentParser(description="MMDVM YSF live-caller OLED")
+    parser = argparse.ArgumentParser(
+        description="MMDVM YSF live-caller OLED (SSD1306/SH1106, several sizes)")
     parser.add_argument("--bus", type=int, default=DEFAULT_I2C_BUS,
                         help="I2C bus number (default from I2C_BUS)")
     parser.add_argument("--address", type=lambda x: int(x, 0),
                         default=DEFAULT_I2C_ADDRESS,
                         help="I2C address (default from I2C_ADDRESS)")
-    parser.add_argument("--contrast", type=lambda x: int(x, 0), default=0xCF)
+    parser.add_argument("--controller", default=DEFAULT_CONTROLLER,
+                        help="ssd1306 (default; ssd1309/ssd1315 are aliases) or sh1106")
+    parser.add_argument("--size", default=DEFAULT_SIZE,
+                        choices=sorted(SIZE_MAP),
+                        help="panel size: 128x64, 128x32 or 64x48")
+    parser.add_argument("--rotate", type=int, default=DEFAULT_ROTATE,
+                        choices=(0, 180), help="rotate the panel 180 degrees")
+    parser.add_argument("--contrast", type=lambda x: int(x, 0),
+                        default=DEFAULT_CONTRAST)
     parser.add_argument("--gateway-log", type=Path,
                         default=DEFAULT_LOG_DIR / "ysfgateway.log")
     parser.add_argument("--host-log", type=Path,
@@ -449,21 +550,53 @@ def main() -> int:
     parser.add_argument("--clear", action="store_true")
     args = parser.parse_args()
 
-    if args.own_call:
-        OWN_CALL = args.own_call.upper()
+    controller = CONTROLLER_ALIASES.get(args.controller.strip().lower())
+    if controller is None:
+        parser.error("controller must be ssd1306/ssd1309/ssd1315/sh1106/auto")
+    size = args.size.strip().lower()
+    if size not in SIZE_MAP:
+        parser.error("size must be one of: " + ", ".join(sorted(SIZE_MAP)))
+    if controller == "sh1106" and size != "128x64":
+        parser.error("SH1106 support here is limited to 128x64")
+    if args.rotate not in (0, 180):
+        parser.error("rotate must be 0 or 180")
+    if not 0 <= args.contrast <= 0xFF:
+        parser.error("contrast must be 0x00-0xFF")
+
+    OWN_CALL = (args.own_call or OWN_CALL).upper()
     if args.reflector:
         REFLECTOR = args.reflector
     if args.frequency:
         FREQUENCY = args.frequency
+    WIDTH, HEIGHT = SIZE_MAP[size]
 
-    fonts = (
-        _font(FONT_BOLD, 9),
-        _font(FONT_BOLD, 16),
-        _font(FONT_BOLD, 10),
-        _font(FONT_REGULAR, 9),
-        _font(FONT_REGULAR, 8),
-        _font(FONT_CJK, 11),
-    )
+    if HEIGHT >= 60:
+        fonts = (
+            _font(FONT_BOLD, 9),
+            _font(FONT_BOLD, 16),
+            _font(FONT_BOLD, 10),
+            _font(FONT_REGULAR, 9),
+            _font(FONT_REGULAR, 8),
+            _font(FONT_CJK, 11),
+        )
+    elif HEIGHT <= 32:
+        fonts = (
+            _font(FONT_BOLD, 7),
+            _font(FONT_BOLD, 12),
+            _font(FONT_BOLD, 8),
+            _font(FONT_REGULAR, 7),
+            _font(FONT_REGULAR, 7),
+            _font(FONT_CJK, 9),
+        )
+    else:
+        fonts = (
+            _font(FONT_BOLD, 7),
+            _font(FONT_BOLD, 12),
+            _font(FONT_BOLD, 8),
+            _font(FONT_REGULAR, 7),
+            _font(FONT_REGULAR, 7),
+            _font(FONT_CJK, 9),
+        )
 
     def frame():
         status = collect_status(args.gateway_log, args.host_log, args.demo_call)
@@ -474,12 +607,14 @@ def main() -> int:
         status.update(gateway_running=True, host_running=True, linked=True)
         image = render(status, fonts)
         args.preview.parent.mkdir(parents=True, exist_ok=True)
-        image.resize((512, 256), 0).save(args.preview)
-        print(f"wrote {args.preview}")
+        image.resize((WIDTH * 4, HEIGHT * 4), 0).save(args.preview)
+        print(f"wrote {args.preview} ({WIDTH}x{HEIGHT}, {controller})")
         return 0
 
     try:
-        display = SSD1306(args.bus, args.address, args.contrast)
+        display = I2CDisplay(args.bus, args.address, args.contrast,
+                             controller=controller, width=WIDTH, height=HEIGHT,
+                             rotate=args.rotate)
     except OSError as exc:
         print(f"OLED: cannot open /dev/i2c-{args.bus} at 0x{args.address:02X}: {exc}",
               file=sys.stderr)

@@ -166,14 +166,17 @@ fi
 
 echo
 echo "== dependencies =="
+PACKAGES=(build-essential patch curl libmosquitto-dev nlohmann-json3-dev python3-pil i2c-tools)
+DSTAR_FLAG="$(config_get ENABLE_DSTAR "$CONFIG")"
+case "${DSTAR_FLAG,,}" in
+	1|yes|true|on) PACKAGES+=(libcurl4-openssl-dev libboost-dev) ;;
+esac
 if command -v apt-get >/dev/null 2>&1; then
 	say_run env DEBIAN_FRONTEND=noninteractive apt-get update
-	say_run env DEBIAN_FRONTEND=noninteractive apt-get install -y \
-		build-essential patch curl libmosquitto-dev nlohmann-json3-dev \
-		python3-pil i2c-tools
+	say_run env DEBIAN_FRONTEND=noninteractive apt-get install -y "${PACKAGES[@]}"
 else
 	echo "WARNING: apt-get not found; install these manually:" >&2
-	echo "  build-essential patch curl libmosquitto-dev nlohmann-json3-dev python3-pil i2c-tools" >&2
+	printf '  %s\n' "${PACKAGES[*]}" >&2
 fi
 
 echo

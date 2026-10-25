@@ -1,0 +1,17 @@
+[Unit]
+Description=DMR Gateway for MMDVM
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=mmdvm
+Group=mmdvm
+WorkingDirectory=/var/lib/mmdvm
+ExecStart=/usr/local/bin/DMRGateway /etc/mmdvm/DMRGateway.ini
+StandardOutput=append:/var/log/mmdvm/dmrgateway.log
+StandardError=journal
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

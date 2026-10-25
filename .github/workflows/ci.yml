@@ -30,7 +30,7 @@ jobs:
           cp config.example.env /tmp/x86.env
           sed -i 's/^MODEM_PORT=.*/MODEM_PORT=\/dev\/ttyUSB0/; s/^ENABLE_OLED=.*/ENABLE_OLED=0/' /tmp/x86.env
           MMDVM_PLATFORM=x86 python3 scripts/render_configs.py --config /tmp/x86.env --check
-      - name: Render fixture without hardware
+      - name: Render YSF-only fixture without hardware
         run: |
           cp config.example.env /tmp/fixture.env
           sed -i 's/^MODEM_PORT=.*/MODEM_PORT=\/dev\/null/; s/^ENABLE_OLED=.*/ENABLE_OLED=0/' /tmp/fixture.env
@@ -38,11 +38,39 @@ jobs:
           grep -qx 'UARTPort=/dev/null' /tmp/v02-build/etc/MMDVM-Host.ini
           grep -qx 'UARTSpeed=115200' /tmp/v02-build/etc/MMDVM-Host.ini
           grep -qx 'ENABLE_OLED=0' /tmp/v02-build/etc/system.env
-      - name: Render OLED preview
+          test ! -e /tmp/v02-build/etc/DMRGateway.ini
+          test ! -e /tmp/v02-build/etc/DStarGateway.cfg
+      - name: Render DMR + D-Star fixture without hardware
         run: |
-          python3 oled/oled_display.py --preview /tmp/oled.png \
-            --own-call N0CALL --reflector 46001 --frequency 438.800 --demo-call JA1ABC
-          test -s /tmp/oled.png
+          cp config.example.env /tmp/multi.env
+          sed -i \
+            -e 's/^MODEM_PORT=.*/MODEM_PORT=\/dev\/null/' \
+            -e 's/^ENABLE_OLED=.*/ENABLE_OLED=0/' \
+            -e 's/^ENABLE_DMR=.*/ENABLE_DMR=1/' \
+            -e 's/^DMR_ID=.*/DMR_ID=1234567/' \
+            -e 's/^DMR_PASSWORD=.*/DMR_PASSWORD=dummy-pass-123/' \
+            -e 's/^ENABLE_DSTAR=.*/ENABLE_DSTAR=1/' \
+            -e 's/^DSTAR_REFLECTOR=.*/DSTAR_REFLECTOR=REF001 C/' \
+            /tmp/multi.env
+          python3 scripts/render_configs.py --config /tmp/multi.env --output /tmp/multi-build --quiet
+          grep -qx 'Enable=1' /tmp/multi-build/etc/MMDVM-Host.ini
+          grep -qx 'Password=dummy-pass-123' /tmp/multi-build/etc/DMRGateway.ini
+          grep -qx 'reflector=REF001 C' /tmp/multi-build/etc/DStarGateway.cfg
+          grep -qx 'DMR_ID=1234567' /tmp/multi-build/etc/system.env
+          grep -qx 'ENABLE_DSTAR=1' /tmp/multi-build/etc/system.env
+      - name: OLED previews for every supported panel
+        run: |
+          for size in 128x64 128x32 64x48; do
+            python3 oled/oled_display.py --preview "/tmp/oled-$size.png" \
+              --own-call N0CALL --reflector 46001 --frequency 438.800 \
+              --demo-call JA1ABC --size "$size"
+            test -s "/tmp/oled-$size.png"
+          done
+          python3 oled/oled_display.py --preview /tmp/oled-sh1106.png \
+            --controller sh1106 --size 128x64 --rotate 180 --demo-call JA1ABC
+          test -s /tmp/oled-sh1106.png
+          python3 oled/oled_display.py --preview /tmp/oled-idle.png \
+            --size 128x32 --own-call N0CALL
 
   build:
     runs-on: ubuntu-latest
@@ -51,8 +79,15 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential patch curl libmosquitto-dev nlohmann-json3-dev
-      - name: Fetch, patch and build upstream
-        run: ./scripts/build.sh
-      - name: Show built binaries
-        run: ls -lh build/bin
+          sudo apt-get install -y build-essential patch curl libmosquitto-dev \
+            nlohmann-json3-dev libcurl4-openssl-dev libboost-dev
+      - name: Fetch, patch and build upstream (YSF + optional gateways)
+        run: ENABLE_DMR=1 ENABLE_DSTAR=1 ./scripts/build.sh
+      - name: Show built binaries and D-Star data
+        run: |
+          ls -lh build/bin
+          test -x build/bin/MMDVM-Host
+          test -x build/bin/YSFGateway
+          test -x build/bin/DMRGateway
+          test -x build/bin/dstargateway
+          test -f build/share/dstargateway.d/DPlus_Hosts.txt

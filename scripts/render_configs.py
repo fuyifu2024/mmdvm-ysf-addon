@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Validate config.env and render MMDVM/YSFGateway/OLED configuration.
+"""Validate config.env and render MMDVMHost/YSFGateway/optional gateway configs.
+
+YSF is always enabled.  DMR (DMRGateway) and D-Star (DStarGateway) templates are
+rendered only when ENABLE_DMR / ENABLE_DSTAR are set, so the default install
+stays YSF-only.  The OLED settings are validated here and written to oled.env.
 
 The renderer is deterministic for a given machine state.  It never sources the
 env file through a shell and only writes inside the requested build directory.
@@ -80,6 +84,17 @@ def require(values: dict[str, str], key: str) -> str:
     if not value:
         raise ConfigError(f"missing required key {key}")
     return value
+
+
+def parse_bool(value: str | None, label: str, default: bool = False) -> bool:
+    if value is None or not value.strip():
+        return default
+    lowered = value.strip().lower()
+    if lowered in ("1", "yes", "true", "on"):
+        return True
+    if lowered in ("0", "no", "false", "off"):
+        return False
+    raise ConfigError(f"{label} must be 0/1, no/yes, false/true, or off/on")
 
 
 def detect_platform() -> str:
@@ -263,6 +278,90 @@ def validate(values: dict[str, str]) -> dict[str, object]:
     if not 0x03 <= i2c_address <= 0x77:
         raise ConfigError("I2C_ADDRESS must be a 7-bit address between 0x03 and 0x77")
 
+    controller_raw = values.get("OLED_CONTROLLER", "auto").strip().lower() or "auto"
+    controller_aliases = {
+        "auto": "ssd1306", "ssd1306": "ssd1306", "ssd1309": "ssd1306",
+        "ssd1315": "ssd1306", "sh1106": "sh1106",
+    }
+    if controller_raw not in controller_aliases:
+        raise ConfigError("OLED_CONTROLLER must be auto, ssd1306, ssd1309, ssd1315 or sh1106")
+    oled_controller = controller_aliases[controller_raw]
+
+    oled_size = values.get("OLED_SIZE", "128x64").strip().lower() or "128x64"
+    size_map = {"128x64": (128, 64), "128x32": (128, 32), "64x48": (64, 48)}
+    if oled_size not in size_map:
+        raise ConfigError("OLED_SIZE must be 128x64, 128x32 or 64x48")
+    if oled_controller == "sh1106" and oled_size != "128x64":
+        raise ConfigError("SH1106 support is limited to 128x64 in this add-on")
+    oled_width, oled_height = size_map[oled_size]
+
+    try:
+        oled_rotate = int(values.get("OLED_ROTATE", "0").strip() or "0")
+    except ValueError as exc:
+        raise ConfigError("OLED_ROTATE must be 0 or 180") from exc
+    if oled_rotate not in (0, 180):
+        raise ConfigError("OLED_ROTATE must be 0 or 180")
+
+    try:
+        oled_contrast = int(values.get("OLED_CONTRAST", "0xCF").strip() or "0xCF", 0)
+    except ValueError as exc:
+        raise ConfigError("OLED_CONTRAST must be a number such as 0xCF") from exc
+    if not 0 <= oled_contrast <= 255:
+        raise ConfigError("OLED_CONTRAST must be between 0 and 255")
+
+    enable_dmr = parse_bool(values.get("ENABLE_DMR"), "ENABLE_DMR")
+    dmr_id = 0
+    dmr_master = ""
+    dmr_port = 62031
+    dmr_password = ""
+    dmr_color_code = 1
+    if enable_dmr:
+        try:
+            dmr_id = int(require(values, "DMR_ID"))
+        except ValueError as exc:
+            raise ConfigError("DMR_ID must be a number") from exc
+        if not 1 <= dmr_id <= 9999999:
+            raise ConfigError("DMR_ID must be between 1 and 9999999")
+        dmr_master = require(values, "DMR_MASTER")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]{0,252}", dmr_master):
+            raise ConfigError("DMR_MASTER must be a hostname or IPv4 address")
+        try:
+            dmr_port = int(values.get("DMR_PORT", "62031").strip() or "62031")
+        except ValueError as exc:
+            raise ConfigError("DMR_PORT must be a number") from exc
+        if not 1 <= dmr_port <= 65535:
+            raise ConfigError("DMR_PORT must be between 1 and 65535")
+        dmr_password = values.get("DMR_PASSWORD", "").strip()
+        # Printable ASCII, no spaces: BrandMeister passwords may contain
+        # punctuation, but the INI format has no quoting for whitespace.
+        if not re.fullmatch(r"[!-~]{6,64}", dmr_password):
+            raise ConfigError(
+                "DMR_PASSWORD must be 6-64 printable non-space characters"
+            )
+        try:
+            dmr_color_code = int(values.get("DMR_COLOR_CODE", "1").strip() or "1")
+        except ValueError as exc:
+            raise ConfigError("DMR_COLOR_CODE must be a number") from exc
+        if not 0 <= dmr_color_code <= 15:
+            raise ConfigError("DMR_COLOR_CODE must be between 0 and 15")
+
+    enable_dstar = parse_bool(values.get("ENABLE_DSTAR"), "ENABLE_DSTAR")
+    dstar_reflector = ""
+    dstar_module = "C"
+    if enable_dstar:
+        if len(callsign) > 8:
+            raise ConfigError("D-Star callsigns are limited to 8 characters")
+        dstar_reflector = require(values, "DSTAR_REFLECTOR").strip()
+        match = re.fullmatch(r"([A-Za-z0-9-]+)[ \t]+([A-Da-d])", dstar_reflector)
+        if not match:
+            raise ConfigError(
+                "DSTAR_REFLECTOR must look like 'REF001 C' (reflector name + module A-D)"
+            )
+        dstar_reflector = f"{match.group(1).upper()} {match.group(2).upper()}"
+        dstar_module = values.get("DSTAR_MODULE", "C").strip().upper() or "C"
+        if not re.fullmatch(r"[A-D]", dstar_module):
+            raise ConfigError("DSTAR_MODULE must be A, B, C or D")
+
     return {
         "callsign": callsign,
         "suffix": suffix,
@@ -283,6 +382,22 @@ def validate(values: dict[str, str]) -> dict[str, object]:
         "enable_oled": enable_oled,
         "i2c_bus": i2c_bus,
         "i2c_address": i2c_address,
+        "oled_controller": oled_controller,
+        "oled_size": oled_size,
+        "oled_width": oled_width,
+        "oled_height": oled_height,
+        "oled_rotate": oled_rotate,
+        "oled_contrast": oled_contrast,
+        "enable_dmr": enable_dmr,
+        "dmr_id": dmr_id,
+        "dmr_master": dmr_master,
+        "dmr_port": dmr_port,
+        "dmr_password": dmr_password,
+        "dmr_color_code": dmr_color_code,
+        "enable_dstar": enable_dstar,
+        "dstar_reflector": dstar_reflector,
+        "dstar_module": dstar_module,
+        "mmdvm_id": dmr_id if enable_dmr else 0,
     }
 
 
@@ -314,6 +429,17 @@ def render(values: dict[str, object], output: Path, platform: str) -> list[Path]
         "HOTSPOT_DESC": str(values["hotspot_desc"]),
         "MODEM_PORT": str(values["modem_port"]),
         "MODEM_BAUD": str(values["modem_baud"]),
+        "ENABLE_DMR": "1" if values["enable_dmr"] else "0",
+        "ENABLE_DSTAR": "1" if values["enable_dstar"] else "0",
+        "DMR_ID": str(values["dmr_id"]),
+        "MMDVM_ID": str(values["mmdvm_id"]),
+        "DMR_MASTER": str(values["dmr_master"]),
+        "DMR_PORT": str(values["dmr_port"]),
+        "DMR_PASSWORD": str(values["dmr_password"]),
+        "DMR_COLOR_CODE": str(values["dmr_color_code"]),
+        "DSTAR_REFLECTOR": str(values["dstar_reflector"]),
+        "DSTAR_MODULE": str(values["dstar_module"]),
+        "FREQUENCY_MHZ": str(values["frequency_label"]),
     }
 
     etc = output / "etc"
@@ -327,6 +453,16 @@ def render(values: dict[str, object], output: Path, platform: str) -> list[Path]
     gateway_ini = expand(template("YSFGateway.ini.in"), mapping)
     (etc / "YSFGateway.ini").write_text(gateway_ini, encoding="utf-8")
     written.append(etc / "YSFGateway.ini")
+
+    if values["enable_dmr"]:
+        dmr_ini = expand(template("DMRGateway.ini.in"), mapping)
+        (etc / "DMRGateway.ini").write_text(dmr_ini, encoding="utf-8")
+        written.append(etc / "DMRGateway.ini")
+
+    if values["enable_dstar"]:
+        dstar_cfg = expand(template("DStarGateway.cfg.in"), mapping)
+        (etc / "DStarGateway.cfg").write_text(dstar_cfg, encoding="utf-8")
+        written.append(etc / "DStarGateway.cfg")
 
     hosts = {
         "reflectors": [
@@ -355,6 +491,10 @@ def render(values: dict[str, object], output: Path, platform: str) -> list[Path]
         f"FREQUENCY_LABEL={values['frequency_label']}\n"
         f"I2C_BUS={values['i2c_bus']}\n"
         f"I2C_ADDRESS=0x{int(values['i2c_address']):02X}\n"
+        f"OLED_CONTROLLER={values['oled_controller']}\n"
+        f"OLED_SIZE={values['oled_size']}\n"
+        f"OLED_ROTATE={values['oled_rotate']}\n"
+        f"OLED_CONTRAST=0x{int(values['oled_contrast']):02X}\n"
     )
     (etc / "oled.env").write_text(oled_env, encoding="utf-8")
     written.append(etc / "oled.env")
@@ -363,6 +503,9 @@ def render(values: dict[str, object], output: Path, platform: str) -> list[Path]
         f"MODEM_PORT={values['modem_port']}\n"
         f"MODEM_BAUD={values['modem_baud']}\n"
         f"ENABLE_OLED={values['enable_oled']}\n"
+        f"ENABLE_DMR={'1' if values['enable_dmr'] else '0'}\n"
+        f"ENABLE_DSTAR={'1' if values['enable_dstar'] else '0'}\n"
+        f"DMR_ID={values['dmr_id']}\n"
         f"I2C_BUS={values['i2c_bus']}\n"
         f"I2C_ADDRESS=0x{int(values['i2c_address']):02X}\n"
         f"PLATFORM={platform}\n"
@@ -403,11 +546,26 @@ def main() -> int:
         )
         print(f"modem: {values['modem_port']} @ {values['modem_baud']} baud")
         print(
+            f"modes: YSF=on DMR={'on' if values['enable_dmr'] else 'off'} "
+            f"D-Star={'on' if values['enable_dstar'] else 'off'}"
+        )
+        if values["enable_dmr"]:
+            print(f"DMR: ID {values['dmr_id']} -> {values['dmr_master']}:{values['dmr_port']} "
+                  "(password stored locally)")
+        if values["enable_dstar"]:
+            print(f"D-Star: {values['dstar_reflector']} module {values['dstar_module']}")
+        print(
             f"OLED: {values['enable_oled']} (I2C bus {values['i2c_bus']}, "
-            f"address 0x{int(values['i2c_address']):02X})"
+            f"address 0x{int(values['i2c_address']):02X}, "
+            f"{values['oled_controller']} {values['oled_size']})"
         )
         if values["enable_oled"] == "auto":
             print("      auto OLED probing happens during install (as root)")
+        if values["oled_controller"] == "sh1106" or values["oled_size"] != "128x64":
+            print("      non-default OLED controller/size is implemented but NOT hardware-tested.")
+        if values["enable_dmr"] or values["enable_dstar"]:
+            print("      DMR/D-Star are optional and NOT hardware-tested; "
+                  "they also require network credentials/registration.")
 
     if str(values["callsign"]) == "N0CALL" and not args.quiet:
         print("warning: CALLSIGN is N0CALL; edit config.env before transmitting.",
@@ -422,6 +580,14 @@ def main() -> int:
     if int(values["modem_baud"]) != 115200 and not args.quiet:
         print("warning: 115200 is the tested MMDVM_HS baud rate; "
               "other values are experimental.", file=sys.stderr)
+    if values["enable_dmr"] and not args.quiet:
+        print("warning: DMR support is optional and not hardware-tested; "
+              "keep the DMR password local (config.env and DMRGateway.ini).",
+              file=sys.stderr)
+    if values["enable_dstar"] and not args.quiet:
+        print("warning: D-Star support is optional and not hardware-tested; "
+              "DStarGateway must be built and a registered callsign may be required.",
+              file=sys.stderr)
 
     if args.check:
         return 0

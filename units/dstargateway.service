@@ -1,0 +1,17 @@
+[Unit]
+Description=D-Star Gateway for MMDVM
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=mmdvm
+Group=mmdvm
+WorkingDirectory=/var/lib/mmdvm
+ExecStart=/usr/local/bin/dstargateway /etc/mmdvm/DStarGateway.cfg
+StandardOutput=journal
+StandardError=journal
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

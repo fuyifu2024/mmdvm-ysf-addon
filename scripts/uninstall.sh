@@ -52,6 +52,8 @@ say_run systemctl daemon-reload
 say_run rm -f /usr/local/bin/MMDVM-Host
 say_run rm -f /usr/local/bin/YSFGateway
 say_run rm -f /usr/local/bin/oled_display.py
+say_run rm -f /usr/local/bin/DMRGateway
+say_run rm -f /usr/local/bin/dstargateway
 say_run rm -rf /etc/mmdvm
 say_run rm -rf /var/lib/mmdvm
 say_run rm -f /etc/logrotate.d/mmdvm
@@ -95,6 +97,7 @@ fi
 echo
 echo "Shared packages were NOT removed:"
 echo "  build-essential patch curl libmosquitto-dev nlohmann-json3-dev python3-pil i2c-tools"
+echo "  optional D-Star build deps: libcurl4-openssl-dev libboost-dev"
 echo "Remove them manually only if no other software needs them."
 echo
 echo "Uninstall plan finished."

@@ -1,6 +1,6 @@
 [Unit]
 Description=MMDVM Host (YSF hotspot)
-After=network-online.target ysfgateway.service
+After=network-online.target ysfgateway.service dmrgateway.service dstargateway.service
 Wants=network-online.target ysfgateway.service
 
 [Service]

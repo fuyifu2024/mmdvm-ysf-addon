@@ -15,6 +15,10 @@ I2C_ADDRESS="$(config_get I2C_ADDRESS "$SYSTEM_ENV")"
 I2C_ADDRESS="${I2C_ADDRESS:-0x3C}"
 ENABLE_OLED="$(config_get ENABLE_OLED "$SYSTEM_ENV")"
 ENABLE_OLED="${ENABLE_OLED:-unknown}"
+ENABLE_DMR="$(config_get ENABLE_DMR "$SYSTEM_ENV")"
+ENABLE_DMR="${ENABLE_DMR:-unknown}"
+ENABLE_DSTAR="$(config_get ENABLE_DSTAR "$SYSTEM_ENV")"
+ENABLE_DSTAR="${ENABLE_DSTAR:-unknown}"
 
 # Backward-compatible status for a v0.1 installation that has no system.env.
 if [[ "$MODEM_PORT" == "unknown" && -r /etc/mmdvm/MMDVM-Host.ini ]]; then
@@ -29,6 +33,7 @@ section() { printf '\n== %s ==\n' "$*"; }
 section "platform"
 printf '  %s (%s)\n' "$PLATFORM" "$(uname -m)"
 printf '  modem: %s\n' "$MODEM_PORT"
+printf '  modes: YSF=on DMR=%s D-Star=%s\n' "$ENABLE_DMR" "$ENABLE_DSTAR"
 printf '  OLED config: %s (i2c-%s 0x%s)\n' "$ENABLE_OLED" "$I2C_BUS" "${I2C_ADDRESS#0x}"
 
 section "services"
@@ -41,7 +46,7 @@ while IFS= read -r unit; do
 done < <(service_units)
 
 section "processes"
-ps -o pid,user,stat,etime,cmd -C MMDVM-Host,YSFGateway 2>/dev/null || true
+ps -o pid,user,stat,etime,cmd -C MMDVM-Host,YSFGateway,DMRGateway,dstargateway 2>/dev/null || true
 pgrep -af 'oled_display.py' 2>/dev/null | head -2 || true
 
 section "gateway link"
@@ -50,6 +55,14 @@ if [[ -r /var/log/mmdvm/ysfgateway.log ]]; then
 		/var/log/mmdvm/ysfgateway.log | tail -8
 else
 	echo "  cannot read /var/log/mmdvm/ysfgateway.log (try sudo)"
+fi
+if [[ "$ENABLE_DMR" == "1" && -r /var/log/mmdvm/dmrgateway.log ]]; then
+	echo "  DMR:"
+	tail -n 6 /var/log/mmdvm/dmrgateway.log
+fi
+if [[ "$ENABLE_DSTAR" == "1" ]]; then
+	echo "  D-Star:"
+	journalctl -u dstargateway.service -n 6 --no-pager 2>/dev/null || true
 fi
 
 section "modem / recent RF"
@@ -62,7 +75,7 @@ fi
 
 section "UDP ports"
 if command -v ss >/dev/null 2>&1; then
-	ss -lun 2>/dev/null | grep -E ':(3200|4200|42000)[[:space:]]' || echo "  no MMDVM UDP listeners found"
+	ss -lun 2>/dev/null | grep -E ':(3200|4200|42000|62031|62032|20010|20011)[[:space:]]' || echo "  no MMDVM UDP listeners found"
 else
 	echo "  ss is missing"
 fi

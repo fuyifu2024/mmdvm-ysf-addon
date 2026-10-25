@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-command setup for the MMDVM YSF add-on.
+# One-command setup for the MMDVM hotspot add-on (YSF + optional DMR/D-Star).
 #
 #   ./setup.sh                 interactive: prompts, then prepares/builds/installs
 #   ./setup.sh --dry-run       show the plan without changing anything
@@ -40,6 +40,14 @@ if (( DRY_RUN == 0 )) && (( EUID == 0 )); then
 	exit 1
 fi
 
+esc_sed() {
+	local value="$1"
+	value="${value//\\/\\\\}"
+	value="${value//&/\\&}"
+	value="${value//|/\\|}"
+	printf '%s' "$value"
+}
+
 echo "== MMDVM YSF add-on setup =="
 echo "repo:     $REPO_DIR"
 echo "platform: $PLATFORM"
@@ -50,7 +58,7 @@ if (( DRY_RUN )); then
 		python3 "$REPO_DIR/scripts/render_configs.py" --config "$CONFIG" --check || exit 1
 	else
 		echo "config.env is missing; a real run would copy config.example.env and prompt"
-		echo "for CALLSIGN, FREQUENCY and MODEM_PORT."
+		echo "for CALLSIGN, FREQUENCY, MODEM_PORT, the OLED panel, and optional DMR/D-Star."
 	fi
 	echo
 	echo "== planned steps =="
@@ -119,17 +127,117 @@ if (( NON_INTERACTIVE == 0 )) && [[ ! -f "$CONFIG" ]]; then
 		echo "  use 'auto' or an absolute /dev/... path" >&2
 	done
 
-	# Values are validated above; escape & for sed replacements.
-	esc_callsign="${CALLSIGN_IN//&/\\&}"
-	esc_frequency="${FREQUENCY_IN//&/\\&}"
-	esc_modem="${MODEM_IN//&/\\&}"
+	echo
+	echo "OLED panel (I2C address 0x3C):"
+	echo "  1) 128x64 SSD1306   (default, tested 0.96\" module)"
+	echo "  2) 128x32 SSD1306   (0.91\" module)"
+	echo "  3) 64x48 SSD1306    (small module)"
+	echo "  4) 128x64 SH1106    (1.3\" module)"
+	echo "  5) no OLED / another address"
+	read -r -p "OLED panel [1]: " OLED_CHOICE
+	OLED_CHOICE="${OLED_CHOICE:-1}"
+	OLED_ENABLE_IN=auto
+	OLED_CONTROLLER_IN=auto
+	OLED_SIZE_IN=128x64
+	OLED_ROTATE_IN=0
+	case "$OLED_CHOICE" in
+		1) ;;
+		2) OLED_SIZE_IN=128x32 ;;
+		3) OLED_SIZE_IN=64x48 ;;
+		4) OLED_CONTROLLER_IN=sh1106 ;;
+		5) OLED_ENABLE_IN=0 ;;
+		*) echo "  unknown choice; keeping the 128x64 SSD1306 default" >&2 ;;
+	esac
+	if [[ "$OLED_ENABLE_IN" != "0" ]]; then
+		read -r -p "Is the panel mounted upside down (rotate 180)? [y/N] " OLED_ROTATE_IN
+		if [[ "$OLED_ROTATE_IN" =~ ^[Yy]$ ]]; then
+			OLED_ROTATE_IN=180
+		else
+			OLED_ROTATE_IN=0
+		fi
+	fi
+
+	echo
+	read -r -p "Enable DMR network (BrandMeister)? [y/N] " ENABLE_DMR_IN
+	ENABLE_DMR_IN="${ENABLE_DMR_IN:-N}"
+	DMR_ENABLE=0
+	DMR_ID_IN=0
+	DMR_MASTER_IN=4601.master.brandmeister.network
+	DMR_PASSWORD_IN=
+	if [[ "$ENABLE_DMR_IN" =~ ^[Yy]$ ]]; then
+		DMR_ENABLE=1
+		while true; do
+			read -r -p "DMR ID (numeric): " DMR_ID_IN
+			[[ "$DMR_ID_IN" =~ ^[1-9][0-9]{0,6}$ ]] && break
+			echo "  DMR ID must be 1-7 digits" >&2
+		done
+		read -r -p "BrandMeister master [$DMR_MASTER_IN]: " MASTER_IN
+		MASTER_IN="${MASTER_IN:-$DMR_MASTER_IN}"
+		while [[ ! "$MASTER_IN" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]]; do
+			echo "  invalid master hostname" >&2
+			read -r -p "BrandMeister master [$DMR_MASTER_IN]: " MASTER_IN
+			MASTER_IN="${MASTER_IN:-$DMR_MASTER_IN}"
+		done
+		DMR_MASTER_IN="$MASTER_IN"
+		while true; do
+			read -r -s -p "BrandMeister hotspot password (6-64 chars): " DMR_PASSWORD_IN
+			echo
+			[[ "$DMR_PASSWORD_IN" =~ ^[!-~]{6,64}$ ]] && break
+			echo "  use 6-64 printable characters without spaces" >&2
+		done
+	fi
+	echo
+	read -r -p "Enable D-Star network? [y/N] " ENABLE_DSTAR_IN
+	ENABLE_DSTAR_IN="${ENABLE_DSTAR_IN:-N}"
+	DSTAR_ENABLE=0
+	DSTAR_REFLECTOR_IN=
+	DSTAR_MODULE_IN=C
+	if [[ "$ENABLE_DSTAR_IN" =~ ^[Yy]$ ]]; then
+		DSTAR_ENABLE=1
+		while true; do
+			read -r -p "D-Star reflector (e.g. REF001 C): " DSTAR_REFLECTOR_IN
+			[[ "$DSTAR_REFLECTOR_IN" =~ ^[A-Za-z0-9-]+[[:space:]]+[A-Da-d]$ ]] && break
+			echo "  use reflector + module, e.g. REF001 C" >&2
+		done
+		while true; do
+			read -r -p "D-Star module [C]: " DSTAR_MODULE_IN
+			DSTAR_MODULE_IN="${DSTAR_MODULE_IN:-C}"
+			DSTAR_MODULE_IN="${DSTAR_MODULE_IN^^}"
+			[[ "$DSTAR_MODULE_IN" =~ ^[A-D]$ ]] && break
+			echo "  module must be A, B, C or D" >&2
+		done
+	fi
+	echo
+
+	# Values are validated above; escape sed's replacement metacharacters.
+	esc_callsign="$(esc_sed "$CALLSIGN_IN")"
+	esc_frequency="$(esc_sed "$FREQUENCY_IN")"
+	esc_modem="$(esc_sed "$MODEM_IN")"
+	esc_dmr_master="$(esc_sed "$DMR_MASTER_IN")"
+	esc_dmr_password="$(esc_sed "$DMR_PASSWORD_IN")"
+	esc_dstar_reflector="$(esc_sed "$DSTAR_REFLECTOR_IN")"
 	sed -i "s|^CALLSIGN=.*|CALLSIGN=$esc_callsign|" "$CONFIG"
 	sed -i "s|^FREQUENCY=.*|FREQUENCY=$esc_frequency|" "$CONFIG"
 	sed -i "s|^MODEM_PORT=.*|MODEM_PORT=$esc_modem|" "$CONFIG"
+	sed -i "s|^ENABLE_DMR=.*|ENABLE_DMR=$DMR_ENABLE|" "$CONFIG"
+	sed -i "s|^DMR_ID=.*|DMR_ID=$DMR_ID_IN|" "$CONFIG"
+	sed -i "s|^DMR_MASTER=.*|DMR_MASTER=$esc_dmr_master|" "$CONFIG"
+	sed -i "s|^DMR_PASSWORD=.*|DMR_PASSWORD=$esc_dmr_password|" "$CONFIG"
+	sed -i "s|^ENABLE_DSTAR=.*|ENABLE_DSTAR=$DSTAR_ENABLE|" "$CONFIG"
+	sed -i "s|^DSTAR_REFLECTOR=.*|DSTAR_REFLECTOR=$esc_dstar_reflector|" "$CONFIG"
+	sed -i "s|^DSTAR_MODULE=.*|DSTAR_MODULE=$DSTAR_MODULE_IN|" "$CONFIG"
+	sed -i "s|^ENABLE_OLED=.*|ENABLE_OLED=$OLED_ENABLE_IN|" "$CONFIG"
+	sed -i "s|^OLED_CONTROLLER=.*|OLED_CONTROLLER=$OLED_CONTROLLER_IN|" "$CONFIG"
+	sed -i "s|^OLED_SIZE=.*|OLED_SIZE=$OLED_SIZE_IN|" "$CONFIG"
+	sed -i "s|^OLED_ROTATE=.*|OLED_ROTATE=$OLED_ROTATE_IN|" "$CONFIG"
 	if grep -q '^HOTSPOT_NAME=N0CALL' "$CONFIG"; then
 		sed -i "s|^HOTSPOT_NAME=.*|HOTSPOT_NAME=$esc_callsign YSF Hotspot|" "$CONFIG"
 	fi
-	echo "OLED stays auto (installer probes 0x3C); set ENABLE_OLED=0 to disable."
+	if (( DMR_ENABLE )); then
+		chmod 600 "$CONFIG"
+	fi
+	echo "OLED: ${OLED_ENABLE_IN} controller=${OLED_CONTROLLER_IN} size=${OLED_SIZE_IN} rotate=${OLED_ROTATE_IN}"
+	echo "For another I2C address or contrast, edit I2C_ADDRESS/OLED_CONTRAST in config.env."
 	echo "Reflector stays at the example (46001); edit config.env for another one."
 	echo
 fi
@@ -156,7 +264,16 @@ fi
 
 STARTUP="$(config_get REFLECTOR_STARTUP "$CONFIG")"
 ENABLE_OLED_CFG="$(config_get ENABLE_OLED "$CONFIG")"
+OLED_CONTROLLER_CFG="$(config_get OLED_CONTROLLER "$CONFIG")"
+OLED_SIZE_CFG="$(config_get OLED_SIZE "$CONFIG")"
+OLED_ROTATE_CFG="$(config_get OLED_ROTATE "$CONFIG")"
 FREQUENCY_CFG="$(config_get FREQUENCY "$CONFIG")"
+MODES_DMR="$(config_get ENABLE_DMR "$CONFIG")"
+MODES_DSTAR="$(config_get ENABLE_DSTAR "$CONFIG")"
+DMR_ID_CFG="$(config_get DMR_ID "$CONFIG")"
+DMR_MASTER_CFG="$(config_get DMR_MASTER "$CONFIG")"
+DSTAR_REFLECTOR_CFG="$(config_get DSTAR_REFLECTOR "$CONFIG")"
+DSTAR_MODULE_CFG="$(config_get DSTAR_MODULE "$CONFIG")"
 echo
 echo "== summary =="
 echo "  platform:  $PLATFORM"
@@ -164,7 +281,14 @@ echo "  callsign:  $(config_get CALLSIGN "$CONFIG")"
 echo "  frequency: ${FREQUENCY_CFG} MHz"
 echo "  modem:     $(config_get MODEM_PORT "$CONFIG")"
 echo "  reflector: ${STARTUP}"
-echo "  OLED:      ${ENABLE_OLED_CFG:-auto}"
+echo "  modes:     YSF=on DMR=${MODES_DMR:-0} D-Star=${MODES_DSTAR:-0}"
+if [[ "${MODES_DMR:-0}" == "1" ]]; then
+	echo "  DMR:       ID ${DMR_ID_CFG} -> ${DMR_MASTER_CFG} (password hidden)"
+fi
+if [[ "${MODES_DSTAR:-0}" == "1" ]]; then
+	echo "  D-Star:    ${DSTAR_REFLECTOR_CFG} module ${DSTAR_MODULE_CFG}"
+fi
+echo "  OLED:      ${ENABLE_OLED_CFG:-auto} ${OLED_CONTROLLER_CFG:-ssd1306} ${OLED_SIZE_CFG:-128x64} rotate=${OLED_ROTATE_CFG:-0}"
 echo
 if (( ASSUME_YES == 0 )); then
 	read -r -p "Proceed with system changes and installation? [y/N] " CONFIRM
@@ -203,7 +327,17 @@ echo
 echo "== render configuration =="
 python3 "$REPO_DIR/scripts/render_configs.py" --config "$CONFIG"
 
-if [[ -x "$REPO_DIR/build/bin/MMDVM-Host" && -x "$REPO_DIR/build/bin/YSFGateway" ]] && (( REBUILD == 0 )); then
+NEED_BUILD=0
+[[ -x "$REPO_DIR/build/bin/MMDVM-Host" && -x "$REPO_DIR/build/bin/YSFGateway" ]] || NEED_BUILD=1
+BUILD_DMR_FLAG="$(config_get ENABLE_DMR "$REPO_DIR/build/etc/system.env")"
+BUILD_DSTAR_FLAG="$(config_get ENABLE_DSTAR "$REPO_DIR/build/etc/system.env")"
+case "${BUILD_DMR_FLAG,,}" in
+	1|yes|true|on) [[ -x "$REPO_DIR/build/bin/DMRGateway" ]] || NEED_BUILD=1 ;;
+esac
+case "${BUILD_DSTAR_FLAG,,}" in
+	1|yes|true|on) [[ -x "$REPO_DIR/build/bin/dstargateway" ]] || NEED_BUILD=1 ;;
+esac
+if (( NEED_BUILD == 0 && REBUILD == 0 )); then
 	echo
 	echo "== build =="
 	echo "existing build found; use --rebuild to recompile"
@@ -236,6 +370,6 @@ echo "== status =="
 
 echo
 echo "Setup finished."
-echo "Radio: ${FREQUENCY_CFG} MHz, DN mode, DG-ID 0, no CTCSS/tone."
+echo "Radio: ${FREQUENCY_CFG} MHz; select the matching mode (YSF DN / DMR / D-Star)."
 echo "Connect a suitable antenna or dummy load before a longer transmission."
 echo "Use ./scripts/status.sh and tail -f /var/log/mmdvm/mmdvmhost.log to monitor."

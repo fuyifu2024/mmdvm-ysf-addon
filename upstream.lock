@@ -7,3 +7,7 @@ MMDVMHOST_URL=https://codeload.github.com/g4klx/MMDVMHost/tar.gz/refs/heads/mast
 MMDVMHOST_SHA256=f057ed1d2384a8233fbc6c50f02a680607f66cabaa39d62fe24283849a4fd0e1
 YSFCLIENTS_URL=https://codeload.github.com/g4klx/YSFClients/tar.gz/refs/heads/master
 YSFCLIENTS_SHA256=710681a5d7143a2d2c4b5b0727012649bbe175b6e46a10952a1276999e634697
+DMRGATEWAY_URL=https://codeload.github.com/g4klx/DMRGateway/tar.gz/refs/heads/master
+DMRGATEWAY_SHA256=a1224a979f89b2d0fcddcfbcbf187641804b9690bda629125371fd9ecd736794
+DSTARGATEWAY_URL=https://codeload.github.com/F4FXL/DStarGateway/tar.gz/refs/heads/master
+DSTARGATEWAY_SHA256=be87d6e6f1f50cbf894310b290f7b504213295309034b1056dcbe7fd76deb266

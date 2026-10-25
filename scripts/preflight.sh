@@ -170,10 +170,10 @@ else
 	ok "no MMDVM-Host/YSFGateway process is running"
 fi
 if command -v ss >/dev/null 2>&1; then
-	if ss -lun 2>/dev/null | grep -Eq ':(3200|4200|42000)[[:space:]]'; then
-		bad "UDP port 3200, 4200 or 42000 is already in use"
+	if ss -lun 2>/dev/null | grep -Eq ':(3200|4200|42000|62031|62032|20010|20011)[[:space:]]'; then
+		bad "an MMDVM UDP port is already in use (3200/4200/42000/62031/62032/20010/20011)"
 	else
-		ok "MMDVM UDP ports 3200/4200/42000 are free"
+		ok "MMDVM UDP ports (YSF/DMR/D-Star) are free"
 	fi
 else
 	warn "ss is missing; could not check UDP ports"

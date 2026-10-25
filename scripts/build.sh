@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Fetch pinned upstream sources, apply the add-on patches, and build.
+# Fetch pinned upstream sources, apply the YSF patches, and build.
+# YSF is always built. DMRGateway and DStarGateway are optional and built only
+# when ENABLE_DMR / ENABLE_DSTAR is set in build/etc/system.env or the env.
 # Runs as your normal user; prepare-system.sh provides the build dependencies.
 set -euo pipefail
 
@@ -8,6 +10,7 @@ BUILD="$REPO_DIR/build"
 CACHE="$BUILD/cache"
 SRC="$BUILD/src"
 BIN="$BUILD/bin"
+SHARE="$BUILD/share"
 JOBS="${JOBS:-2}"
 NO_FETCH=0
 
@@ -16,7 +19,8 @@ for arg in "$@"; do
 		--no-fetch) NO_FETCH=1 ;;
 		-h|--help)
 			echo "usage: $0 [--no-fetch]"
-			echo "  JOBS=N  parallel make jobs (default 2, useful on a 4 GB Pi 5)"
+			echo "  JOBS=N  parallel make jobs (default 2; setup uses 1 on low memory)"
+			echo "  ENABLE_DMR=1 ENABLE_DSTAR=1 can override build/etc/system.env"
 			exit 0
 			;;
 		*) echo "unknown option: $arg" >&2; exit 2 ;;
@@ -29,6 +33,28 @@ get_lock() {
 	awk -F= -v key="$key" '$1 == key { print substr($0, index($0, "=") + 1); exit }' \
 		"$REPO_DIR/upstream.lock"
 }
+file_value() {
+	local key="$1" file="$BUILD/etc/system.env"
+	[[ -f "$file" ]] || return 0
+	awk -F= -v key="$key" '$1 == key { print substr($0, index($0, "=") + 1); exit }' "$file"
+}
+as_bool() {
+	case "${1,,}" in
+		1|yes|true|on) echo 1 ;;
+		*) echo 0 ;;
+	esac
+}
+
+if [[ -n "${ENABLE_DMR:-}" ]]; then
+	BUILD_DMR="$(as_bool "$ENABLE_DMR")"
+else
+	BUILD_DMR="$(as_bool "$(file_value ENABLE_DMR)")"
+fi
+if [[ -n "${ENABLE_DSTAR:-}" ]]; then
+	BUILD_DSTAR="$(as_bool "$ENABLE_DSTAR")"
+else
+	BUILD_DSTAR="$(as_bool "$(file_value ENABLE_DSTAR)")"
+fi
 
 MMDVMHOST_URL="$(get_lock MMDVMHOST_URL)"
 MMDVMHOST_SHA256="$(get_lock MMDVMHOST_SHA256)"
@@ -37,13 +63,29 @@ YSFCLIENTS_SHA256="$(get_lock YSFCLIENTS_SHA256)"
 [[ -n "$MMDVMHOST_URL" && -n "$MMDVMHOST_SHA256" ]] || die "incomplete MMDVMHost entry in upstream.lock"
 [[ -n "$YSFCLIENTS_URL" && -n "$YSFCLIENTS_SHA256" ]] || die "incomplete YSFClients entry in upstream.lock"
 
+if (( BUILD_DMR )); then
+	DMRGATEWAY_URL="$(get_lock DMRGATEWAY_URL)"
+	DMRGATEWAY_SHA256="$(get_lock DMRGATEWAY_SHA256)"
+	[[ -n "$DMRGATEWAY_URL" && -n "$DMRGATEWAY_SHA256" ]] || die "incomplete DMRGateway entry in upstream.lock"
+fi
+if (( BUILD_DSTAR )); then
+	DSTARGATEWAY_URL="$(get_lock DSTARGATEWAY_URL)"
+	DSTARGATEWAY_SHA256="$(get_lock DSTARGATEWAY_SHA256)"
+	[[ -n "$DSTARGATEWAY_URL" && -n "$DSTARGATEWAY_SHA256" ]] || die "incomplete DStarGateway entry in upstream.lock"
+fi
+
 for tool in curl tar sha256sum make c++ patch; do
 	command -v "$tool" >/dev/null 2>&1 || die "missing build tool: $tool (run sudo ./scripts/prepare-system.sh)"
 done
 [[ -f /usr/include/mosquitto.h ]] || die "libmosquitto-dev is missing (run sudo ./scripts/prepare-system.sh)"
 [[ -f /usr/include/nlohmann/json.hpp ]] || die "nlohmann-json3-dev is missing (run sudo ./scripts/prepare-system.sh)"
+if (( BUILD_DSTAR )); then
+	[[ -f /usr/include/curl/curl.h ]] || die "libcurl4-openssl-dev is missing (run sudo ./scripts/prepare-system.sh)"
+	[[ -f /usr/include/boost/version.hpp ]] || die "libboost-dev is missing (run sudo ./scripts/prepare-system.sh)"
+fi
 
-mkdir -p "$CACHE" "$SRC" "$BIN"
+echo "build modes: YSF=on DMR=$([[ $BUILD_DMR == 1 ]] && echo on || echo off) D-Star=$([[ $BUILD_DSTAR == 1 ]] && echo on || echo off)"
+mkdir -p "$CACHE" "$SRC" "$BIN" "$SHARE"
 
 fetch() {
 	local url="$1" sha="$2" out="$3"
@@ -64,6 +106,12 @@ fetch() {
 
 fetch "$MMDVMHOST_URL" "$MMDVMHOST_SHA256" "$CACHE/mmdvmhost.tar.gz"
 fetch "$YSFCLIENTS_URL" "$YSFCLIENTS_SHA256" "$CACHE/ysfclients.tar.gz"
+if (( BUILD_DMR )); then
+	fetch "$DMRGATEWAY_URL" "$DMRGATEWAY_SHA256" "$CACHE/dmrgateway.tar.gz"
+fi
+if (( BUILD_DSTAR )); then
+	fetch "$DSTARGATEWAY_URL" "$DSTARGATEWAY_SHA256" "$CACHE/dstargateway.tar.gz"
+fi
 
 echo
 echo "== extracting upstream sources =="
@@ -71,9 +119,19 @@ rm -rf "$SRC/MMDVMHost" "$SRC/YSFClients"
 mkdir -p "$SRC/MMDVMHost" "$SRC/YSFClients"
 tar -xzf "$CACHE/mmdvmhost.tar.gz" -C "$SRC/MMDVMHost" --strip-components=1
 tar -xzf "$CACHE/ysfclients.tar.gz" -C "$SRC/YSFClients" --strip-components=1
+if (( BUILD_DMR )); then
+	rm -rf "$SRC/DMRGateway"
+	mkdir -p "$SRC/DMRGateway"
+	tar -xzf "$CACHE/dmrgateway.tar.gz" -C "$SRC/DMRGateway" --strip-components=1
+fi
+if (( BUILD_DSTAR )); then
+	rm -rf "$SRC/DStarGateway"
+	mkdir -p "$SRC/DStarGateway"
+	tar -xzf "$CACHE/dstargateway.tar.gz" -C "$SRC/DStarGateway" --strip-components=1
+fi
 
 echo
-echo "== applying add-on patches =="
+echo "== applying YSF add-on patches =="
 cd "$SRC/YSFClients"
 for patch_file in "$REPO_DIR"/patches/*.patch; do
 	echo "  $(basename "$patch_file")"
@@ -99,10 +157,40 @@ make -j"$JOBS" > "$BUILD/build-ysfgateway.log" 2>&1 || {
 install -m 0755 "$SRC/MMDVMHost/MMDVM-Host" "$BIN/MMDVM-Host"
 install -m 0755 "$SRC/YSFClients/YSFGateway/YSFGateway" "$BIN/YSFGateway"
 
+if (( BUILD_DMR )); then
+	echo "== building DMRGateway (make -j$JOBS) =="
+	cd "$SRC/DMRGateway"
+	make -j"$JOBS" > "$BUILD/build-dmrgateway.log" 2>&1 || {
+		tail -n 40 "$BUILD/build-dmrgateway.log" >&2
+		die "DMRGateway build failed (log: $BUILD/build-dmrgateway.log)"
+	}
+	install -m 0755 "$SRC/DMRGateway/DMRGateway" "$BIN/DMRGateway"
+fi
+
+if (( BUILD_DSTAR )); then
+	echo "== building DStarGateway (make -j$JOBS) =="
+	cd "$SRC/DStarGateway"
+	make -j"$JOBS" DStarGateway/dstargateway > "$BUILD/build-dstargateway.log" 2>&1 || {
+		tail -n 40 "$BUILD/build-dstargateway.log" >&2
+		die "DStarGateway build failed (log: $BUILD/build-dstargateway.log)"
+	}
+	install -m 0755 "$SRC/DStarGateway/DStarGateway/dstargateway" "$BIN/dstargateway"
+	# The initial reflector host lists and voice prompts are required at
+	# startup; DStarGateway can update them later in the writable data dir.
+	rm -rf "$SHARE/dstargateway.d"
+	mkdir -p "$SHARE/dstargateway.d"
+	cp -a "$SRC/DStarGateway/Data/." "$SHARE/dstargateway.d/"
+fi
+
 echo
 echo "== build result =="
 ls -lh "$BIN/MMDVM-Host" "$BIN/YSFGateway"
-if ldd "$BIN/MMDVM-Host" | grep -q 'not found' || ldd "$BIN/YSFGateway" | grep -q 'not found'; then
-	die "a runtime library is missing; check ldd output"
-fi
+(( BUILD_DMR )) && ls -lh "$BIN/DMRGateway"
+(( BUILD_DSTAR )) && ls -lh "$BIN/dstargateway"
+for binary in MMDVM-Host YSFGateway DMRGateway dstargateway; do
+	[[ -f "$BIN/$binary" ]] || continue
+	if ldd "$BIN/$binary" | grep -q 'not found'; then
+		die "a runtime library is missing for $binary; check ldd output"
+	fi
+done
 echo "build OK"

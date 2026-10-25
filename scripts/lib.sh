@@ -109,7 +109,7 @@ detect_oled() {
 }
 
 service_units() {
-	printf '%s\n' ysfgateway mmdvmhost oled-display
+	printf '%s\n' ysfgateway mmdvmhost oled-display dmrgateway dstargateway
 }
 
 # Read a simple KEY=value from an env file without executing it.

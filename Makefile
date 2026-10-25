@@ -8,7 +8,7 @@ help:
 	@echo "  make preflight  read-only environment/conflict checks"
 	@echo "  make prep       enable UART/dependencies (sudo)"
 	@echo "  make build      fetch pinned upstream, apply patches, build"
-	@echo "  make install    install and start the three services (sudo)"
+	@echo "  make install    install and start the add-on services (sudo)"
 	@echo "  make status     show services, logs and hardware state"
 	@echo "  make uninstall  stop and remove the add-on (sudo)"
 	@echo "  make test       syntax + hardware-free config/platform dry-runs"
