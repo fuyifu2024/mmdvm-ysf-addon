@@ -1,0 +1,14 @@
+--- a/YSFGateway/YSFReflectors.cpp
++++ b/YSFGateway/YSFReflectors.cpp
+@@ -115,7 +115,10 @@
+ 	m_newReflectors.clear();
+ 
+ 	try {
+-		std::fstream file(m_hostsFile);
++		// The hosts file is read-only configuration.  std::fstream defaults to
++		// in|out and therefore needs write permission, which fails for the
++		// root-owned file installed in /etc/mmdvm; use ifstream instead.
++		std::ifstream file(m_hostsFile);
+ 
+ 		nlohmann::json data = nlohmann::json::parse(file);
+ 

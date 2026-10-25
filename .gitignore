@@ -1,0 +1,27 @@
+# Local configuration (copy from config.example.env)
+config.env
+
+# Generated / downloaded / built content
+build/
+src/
+bin/
+logs/
+deps/
+*.deb
+*.tar.gz
+*.bundle
+
+# Local test configs and logs
+*.local.ini
+*.diag.ini
+*.hwtest.ini
+*.log
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Editor / OS
+.DS_Store
+*.swp

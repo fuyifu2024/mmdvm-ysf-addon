@@ -1,0 +1,18 @@
+[Unit]
+Description=MMDVM Host (YSF hotspot)
+After=network-online.target ysfgateway.service
+Wants=network-online.target ysfgateway.service
+
+[Service]
+User=mmdvm
+Group=mmdvm
+SupplementaryGroups=dialout
+WorkingDirectory=/var/lib/mmdvm
+ExecStart=/usr/local/bin/MMDVM-Host /etc/mmdvm/MMDVM-Host.ini
+StandardOutput=append:/var/log/mmdvm/mmdvmhost.log
+StandardError=journal
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

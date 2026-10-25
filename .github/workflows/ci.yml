@@ -1,0 +1,43 @@
+name: checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Python image library
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pil
+      - name: Shell syntax
+        run: |
+          for script in scripts/*.sh; do
+            bash -n "$script"
+          done
+      - name: Python syntax
+        run: python3 -m py_compile scripts/render_configs.py oled/oled_display.py
+      - name: Validate example configuration
+        run: python3 scripts/render_configs.py --config config.example.env --check --quiet
+      - name: Render OLED preview
+        run: |
+          python3 oled/oled_display.py --preview /tmp/oled.png \
+            --own-call N0CALL --reflector 46001 --frequency 438.800 --demo-call JA1ABC
+          test -s /tmp/oled.png
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential patch curl libmosquitto-dev nlohmann-json3-dev
+      - name: Fetch, patch and build upstream
+        run: ./scripts/build.sh
+      - name: Show built binaries
+        run: ls -lh build/bin

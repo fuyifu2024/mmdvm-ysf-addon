@@ -1,0 +1,9 @@
+# Upstream source lock, captured 2026-10-24.
+#
+# The URLs point at g4klx master, but the SHA-256 values pin the exact content
+# that was built and tested.  If upstream changes, build.sh fails with a clear
+# checksum error; update the URL/checksum and re-test the patches deliberately.
+MMDVMHOST_URL=https://codeload.github.com/g4klx/MMDVMHost/tar.gz/refs/heads/master
+MMDVMHOST_SHA256=f057ed1d2384a8233fbc6c50f02a680607f66cabaa39d62fe24283849a4fd0e1
+YSFCLIENTS_URL=https://codeload.github.com/g4klx/YSFClients/tar.gz/refs/heads/master
+YSFCLIENTS_SHA256=710681a5d7143a2d2c4b5b0727012649bbe175b6e46a10952a1276999e634697

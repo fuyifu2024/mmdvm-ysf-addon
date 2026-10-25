@@ -1,0 +1,18 @@
+--- a/YSFGateway/YSFGateway.cpp
++++ b/YSFGateway/YSFGateway.cpp
+@@ -236,8 +236,13 @@
+ 
+ 	m_mqtt = new CMQTTConnection(m_conf.getMQTTAddress(), m_conf.getMQTTPort(), m_conf.getMQTTName(), m_conf.getMQTTAuthEnabled(), m_conf.getMQTTUsername(), m_conf.getMQTTPassword(), subscriptions, m_conf.getMQTTKeepalive());
+ 	ret = m_mqtt->open();
+-	if (!ret)
+-		return 1;
++	if (!ret) {
++		// The hotspot does not need a local MQTT broker.  Upstream exits here,
++		// which makes YSFGateway unusable when mosquitto is not installed.
++		LogWarning("MQTT connection failed; continuing without MQTT");
++		delete m_mqtt;
++		m_mqtt = nullptr;
++	}
+ 
+ 	m_callsign = m_conf.getCallsign();
+ 	m_suffix   = m_conf.getSuffix();

@@ -1,0 +1,18 @@
+[Unit]
+Description=MMDVM YSF OLED live-caller display
+After=mmdvmhost.service ysfgateway.service
+Wants=mmdvmhost.service ysfgateway.service
+ConditionPathExists=/dev/i2c-1
+
+[Service]
+User=mmdvm
+Group=mmdvm
+SupplementaryGroups=i2c
+WorkingDirectory=/var/lib/mmdvm
+EnvironmentFile=/etc/mmdvm/oled.env
+ExecStart=/usr/bin/python3 /usr/local/bin/oled_display.py --gateway-log /var/log/mmdvm/ysfgateway.log --host-log /var/log/mmdvm/mmdvmhost.log
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
