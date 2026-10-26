@@ -1,5 +1,8 @@
 # Local configuration (copy from config.example.env)
 config.env
+config.env.bak-*
+.mmdvm-onboard-*
+.mmdvm-update-*
 
 # Generated / downloaded / built content
 build/

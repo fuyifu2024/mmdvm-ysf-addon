@@ -95,6 +95,8 @@ else
 fi
 
 echo
+echo "Update snapshots in /var/backups/mmdvm were kept (remove them manually if desired)."
+echo
 echo "Shared packages were NOT removed:"
 echo "  build-essential patch curl libmosquitto-dev nlohmann-json3-dev python3-pil i2c-tools"
 echo "  optional D-Star build deps: libcurl4-openssl-dev libboost-dev"

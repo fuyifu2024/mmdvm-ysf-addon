@@ -7,15 +7,87 @@ set -u
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=lib.sh
 . "$REPO_DIR/scripts/lib.sh"
-CONFIG="$REPO_DIR/config.env"
+CONFIG="${MMDVM_CONFIG:-$REPO_DIR/config.env}"
 PLATFORM="$(detect_platform)"
 FAIL=0
 WARN=0
+UPDATE_MODE=0
+ADOPT=0
+
+while (( $# > 0 )); do
+	case "$1" in
+		--update) UPDATE_MODE=1; shift ;;
+		--adopt) UPDATE_MODE=1; ADOPT=1; shift ;;
+		-h|--help)
+			echo "usage: $0 [--update] [--adopt]"
+			echo "  --update  allow an existing add-on install to be updated"
+			echo "  --adopt   additionally allow a legacy /etc/mmdvm install"
+			exit 0
+			;;
+		*) echo "unknown option: $1" >&2; exit 2 ;;
+	esac
+done
 
 ok()   { printf '  [ OK ] %s\n' "$*"; }
 warn() { printf '  [WARN] %s\n' "$*"; WARN=1; }
 bad()  { printf '  [FAIL] %s\n' "$*"; FAIL=1; }
 section() { printf '\n== %s ==\n' "$*"; }
+
+addon_marker() {
+	[[ -r /etc/mmdvm/addon.env ]] &&
+		grep -q '^ADDON=mmdvm-ysf-addon' /etc/mmdvm/addon.env 2>/dev/null
+}
+
+legacy_install() {
+	[[ -e /etc/mmdvm/MMDVM-Host.ini ]] || return 1
+	[[ -e /etc/systemd/system/ysfgateway.service ||
+	   -e /etc/systemd/system/mmdvmhost.service ]]
+}
+
+process_is_addon() {
+	local pid="$1" user exe unit main
+	for unit in $(service_units); do
+		main="$(systemctl show -p MainPID --value "$unit.service" 2>/dev/null || true)"
+		if [[ "$main" == "$pid" && "$main" != "0" ]]; then
+			return 0
+		fi
+	done
+	user="$(ps -o user= -p "$pid" 2>/dev/null | tr -d ' ')"
+	[[ "$user" == "mmdvm" ]] && return 0
+	exe="$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)"
+	case "$exe" in
+		/usr/local/bin/MMDVM-Host|/usr/local/bin/YSFGateway|\
+		/usr/local/bin/DMRGateway|/usr/local/bin/dstargateway)
+			return 0
+			;;
+	esac
+	return 1
+}
+
+addon_processes_owned() {
+	local name pid
+	for name in MMDVM-Host YSFGateway DMRGateway dstargateway; do
+		for pid in $(pgrep -x "$name" 2>/dev/null || true); do
+			process_is_addon "$pid" || return 1
+		done
+	done
+	return 0
+}
+
+addon_ports_owned() {
+	local line pid saw_pid=0
+	while IFS= read -r line; do
+		[[ -n "$line" ]] || continue
+		pid="$(printf '%s\n' "$line" | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2)"
+		if [[ -n "$pid" ]]; then
+			saw_pid=1
+			process_is_addon "$pid" || return 1
+		fi
+	done < <(ss -lunpH 2>/dev/null |
+		grep -E ':(3200|4200|42000|62031|62032|20010|20011)[[:space:]]')
+	(( saw_pid )) || return 2
+	return 0
+}
 
 section "host"
 printf '  platform: %s\n' "$PLATFORM"
@@ -153,25 +225,52 @@ esac
 
 section "add-on conflicts"
 if [[ -e /etc/mmdvm ]]; then
-	bad "/etc/mmdvm already exists; remove/uninstall the existing MMDVM setup first"
+	if (( UPDATE_MODE )) && { addon_marker || legacy_install || (( ADOPT )); }; then
+		ok "existing add-on installation (update mode)"
+	elif (( UPDATE_MODE )); then
+		bad "/etc/mmdvm exists but does not look like this add-on; use --adopt after a backup"
+	else
+		bad "/etc/mmdvm already exists; remove/uninstall the existing MMDVM setup first"
+	fi
 else
 	ok "/etc/mmdvm is free"
 fi
 if command -v systemctl >/dev/null 2>&1; then
 	while IFS= read -r unit; do
 		if systemctl list-unit-files --no-legend "$unit.service" 2>/dev/null | grep -q .; then
-			bad "systemd unit $unit.service already exists"
+			if (( UPDATE_MODE )) && { addon_marker || legacy_install || (( ADOPT )); }; then
+				ok "systemd unit $unit.service belongs to the update target"
+			else
+				bad "systemd unit $unit.service already exists"
+			fi
 		fi
 	done < <(service_units)
 fi
-if pgrep -x MMDVM-Host >/dev/null 2>&1 || pgrep -x YSFGateway >/dev/null 2>&1; then
-	bad "an MMDVM-Host or YSFGateway process is already running"
+if pgrep -x MMDVM-Host >/dev/null 2>&1 || pgrep -x YSFGateway >/dev/null 2>&1 ||
+   pgrep -x DMRGateway >/dev/null 2>&1 || pgrep -x dstargateway >/dev/null 2>&1; then
+	if (( UPDATE_MODE )) && addon_processes_owned; then
+		ok "running MMDVM processes belong to the add-on (update mode)"
+	else
+		bad "a foreign MMDVM process is already running"
+	fi
 else
-	ok "no MMDVM-Host/YSFGateway process is running"
+	ok "no MMDVM process is running"
 fi
 if command -v ss >/dev/null 2>&1; then
 	if ss -lun 2>/dev/null | grep -Eq ':(3200|4200|42000|62031|62032|20010|20011)[[:space:]]'; then
-		bad "an MMDVM UDP port is already in use (3200/4200/42000/62031/62032/20010/20011)"
+		if (( UPDATE_MODE )); then
+			addon_ports_owned
+			rc=$?
+			if (( rc == 0 )); then
+				ok "MMDVM UDP ports are owned by the add-on (update mode)"
+			elif (( rc == 2 )); then
+				warn "cannot see UDP port owners without root; install will re-check as root"
+			else
+				bad "an MMDVM UDP port is used by a foreign process"
+			fi
+		else
+			bad "an MMDVM UDP port is already in use (3200/4200/42000/62031/62032/20010/20011)"
+		fi
 	else
 		ok "MMDVM UDP ports (YSF/DMR/D-Star) are free"
 	fi

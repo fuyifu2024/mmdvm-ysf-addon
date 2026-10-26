@@ -16,11 +16,20 @@ jobs:
           sudo apt-get install -y python3-pil
       - name: Shell syntax
         run: |
-          for script in scripts/*.sh setup.sh; do
+          for script in mmdvm scripts/*.sh setup.sh; do
             bash -n "$script"
           done
       - name: Python syntax
-        run: python3 -m py_compile scripts/render_configs.py oled/oled_display.py
+        run: python3 -m py_compile scripts/*.py oled/oled_display.py
+      - name: Unit tests
+        run: python3 -m unittest discover -s tests -v
+      - name: CLI help
+        run: |
+          ./mmdvm --help
+          ./mmdvm onboard --help
+          ./mmdvm update --help
+          ./scripts/safe-install.sh --help
+          ./scripts/state_backup.py --help
       - name: Validate example configuration
         run: python3 scripts/render_configs.py --config config.example.env --check --quiet
       - name: Setup script dry-run

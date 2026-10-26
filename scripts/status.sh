@@ -19,6 +19,8 @@ ENABLE_DMR="$(config_get ENABLE_DMR "$SYSTEM_ENV")"
 ENABLE_DMR="${ENABLE_DMR:-unknown}"
 ENABLE_DSTAR="$(config_get ENABLE_DSTAR "$SYSTEM_ENV")"
 ENABLE_DSTAR="${ENABLE_DSTAR:-unknown}"
+ADDON_VERSION="$(config_get ADDON_VERSION /etc/mmdvm/addon.env)"
+ADDON_VERSION="${ADDON_VERSION:-unknown}"
 
 # Backward-compatible status for a v0.1 installation that has no system.env.
 if [[ "$MODEM_PORT" == "unknown" && -r /etc/mmdvm/MMDVM-Host.ini ]]; then
@@ -32,6 +34,7 @@ section() { printf '\n== %s ==\n' "$*"; }
 
 section "platform"
 printf '  %s (%s)\n' "$PLATFORM" "$(uname -m)"
+printf '  add-on: %s\n' "$ADDON_VERSION"
 printf '  modem: %s\n' "$MODEM_PORT"
 printf '  modes: YSF=on DMR=%s D-Star=%s\n' "$ENABLE_DMR" "$ENABLE_DSTAR"
 printf '  OLED config: %s (i2c-%s 0x%s)\n' "$ENABLE_OLED" "$I2C_BUS" "${I2C_ADDRESS#0x}"

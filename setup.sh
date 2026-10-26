@@ -6,6 +6,8 @@
 #   ./setup.sh --yes           skip the final confirmation
 #   ./setup.sh --non-interactive  require an existing config.env; no prompts
 #   ./setup.sh --rebuild       force a rebuild even if build/bin exists
+#   ./setup.sh onboard         quick config wizard (after installation)
+#   ./setup.sh update          lossless update (after installation)
 #
 # Run as your normal user, not as root; the script calls sudo where needed.
 set -euo pipefail
@@ -19,6 +21,14 @@ DRY_RUN=0
 ASSUME_YES=0
 NON_INTERACTIVE=0
 REBUILD=0
+
+# Convenience aliases: after the first install, most people want the everyday
+# commands rather than re-running the installer.
+case "${1:-}" in
+	onboard|update|upgrade|status|version)
+		exec "$REPO_DIR/mmdvm" "$@"
+		;;
+esac
 
 for arg in "$@"; do
 	case "$arg" in

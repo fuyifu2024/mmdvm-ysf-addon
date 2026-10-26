@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Everyday CLI for an installed MMDVM add-on.
+#
+#   ./mmdvm onboard   change the station configuration interactively
+#   ./mmdvm update    update the source/build and reinstall without losing config
+#   ./mmdvm status    show services, logs and hardware state
+#   ./mmdvm version   show repository and installed versions
+#   ./mmdvm help
+set -euo pipefail
+
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CMD="${1:-help}"
+(( $# > 0 )) && shift
+
+case "$CMD" in
+	onboard)
+		exec python3 "$REPO_DIR/scripts/onboard.py" "$@"
+		;;
+	update|upgrade)
+		exec python3 "$REPO_DIR/scripts/update.py" "$@"
+		;;
+	status)
+		exec "$REPO_DIR/scripts/status.sh" "$@"
+		;;
+	version|--version|-V)
+		python3 - "$REPO_DIR" <<'PY'
+import pathlib
+import sys
+repo = pathlib.Path(sys.argv[1])
+sys.path.insert(0, str(repo / "scripts"))
+from addon_config import installed_version, read_version
+print(f"repository: {read_version(repo)}")
+print(f"installed:  {installed_version() or 'not installed / no marker'}")
+PY
+		;;
+	help|-h|--help)
+		cat <<'EOF'
+usage: ./mmdvm <command> [options]
+
+commands:
+  onboard   interactively change callsign, frequency, reflector, OLED,
+            DMR or D-Star settings; validates and applies them
+  update    pull the current source (git checkout only) and reinstall with
+            a snapshot/rollback; --no-pull skips the git step
+  status    show the add-on status report
+  version   show repository and installed versions
+
+Run './mmdvm <command> --help' for command options.
+First installation is still ./setup.sh; see README.
+EOF
+		;;
+	*)
+		echo "unknown command: $CMD (try ./mmdvm help)" >&2
+		exit 2
+		;;
+esac

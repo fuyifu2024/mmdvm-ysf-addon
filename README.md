@@ -23,6 +23,8 @@ It adds:
 - `/etc/mmdvm`, `/var/log/mmdvm`, `/var/lib/mmdvm`
 - `/usr/local/bin/{MMDVM-Host,YSFGateway,oled_display.py}` and, when enabled,
   `DMRGateway` / `dstargateway`
+- everyday commands `./mmdvm onboard`, `./mmdvm update`, `./mmdvm status`
+- root-only state snapshots under `/var/backups/mmdvm` for update rollback
 - a boot overlay on Raspberry Pi (`uart0-pi5` on Pi 5; `enable_uart` + BT overlay on
   Pi 4/3 — experimental)
 - build/runtime dependencies listed below
@@ -80,8 +82,9 @@ area and is **not** recommended as a hotspot default; see the frequency note.
 - For DMR: a DMR ID and a BrandMeister hotspot security password.
 - For D-Star: a D-Star-capable/registered callsign and a reflector (registration rules
   depend on the reflector network).
-- No existing MMDVM / Pi-Star / WPSD install on the same machine; preflight refuses
-  to overwrite one.
+- For a first install, no existing MMDVM / Pi-Star / WPSD install on the same machine;
+  preflight refuses to overwrite one. `./mmdvm update` has a separate snapshot-backed
+  mode for this add-on's own legacy install, but still refuses Pi-Star/WPSD.
 - This project does **not** flash firmware or provide a prebuilt OS image.
 
 ## Quick start
@@ -118,6 +121,76 @@ and system preparation are kept. On x86, connect the USB MMDVM modem and rerun i
 serial device is found. `prepare-system.sh` does not restart unrelated services;
 `install-services.sh` only restarts the add-on services.
 
+## Everyday commands
+
+After the first installation, use the small `./mmdvm` launcher instead of re-running
+the installer:
+
+```bash
+./mmdvm onboard        # change callsign/frequency/reflector/OLED/DMR/D-Star
+./mmdvm update         # update source, build and reinstall losslessly
+./mmdvm status         # same report as scripts/status.sh
+./mmdvm version        # repository version and installed marker
+./mmdvm help
+```
+
+### Quick configuration (`onboard`)
+
+`onboard` reads the current `config.env`, shows every current value, and only changes
+what you select. Press Enter to keep a value. The DMR password is never displayed; leave
+the password prompt blank to keep the existing one.
+
+```bash
+./mmdvm onboard --dry-run    # validate and show changes; write nothing
+./mmdvm onboard              # interactive edit, then apply
+./mmdvm onboard --no-apply   # save config.env only; no restart
+```
+
+The candidate is validated with the same renderer used by setup. Applying it takes a
+snapshot, renders configs, builds only when a newly enabled optional gateway is missing,
+installs the add-on services and verifies they became active. A failed apply restores
+the previous config, binaries, units and service state automatically.
+
+If `config.env` is missing but `/etc/mmdvm` exists (including a manually installed
+station with the same `ysfgateway`/`mmdvmhost` units), onboard offers to import the
+known callsign, frequency, UART, reflector, OLED, DMR and D-Star settings first. Reading
+root-owned `/etc/mmdvm` files may ask for sudo; the imported DMR password is written
+locally and never printed.
+
+### Lossless update (`update`)
+
+```bash
+./mmdvm update --dry-run     # show version/state and new config keys; no sudo
+./mmdvm update               # pull, snapshot, build, install, verify
+./mmdvm update --no-pull     # use the current source tree (ZIP/manual copy)
+./mmdvm update --adopt       # take over a legacy /etc/mmdvm install non-interactively
+```
+
+Before changing the installed system, `update` creates a root-only snapshot in
+`/var/backups/mmdvm/<UTC timestamp>/` containing:
+
+- `/etc/mmdvm` (including DMR credentials)
+- the add-on binaries, systemd units, drop-in and logrotate file
+- the repository `config.env`
+- each add-on service's enabled/active state
+
+The last five snapshots are kept. Logs, `/var/lib/mmdvm` D-Star data and the Pi boot
+configuration are not touched. If validation, build, install or the post-install service
+check fails, the snapshot is restored and the old services are restarted. On success the
+backup stays available for manual rollback:
+
+```bash
+sudo python3 scripts/state_backup.py restore /var/backups/mmdvm/<timestamp>
+```
+
+`update` merges new keys from `config.example.env` as defaults, but never overwrites an
+existing value. If the source tree is a clean git checkout it runs `git pull --ff-only`
+first; a dirty tree, network failure or non-fast-forward pull aborts before any system
+change. Download-ZIP users should replace the code manually and use `--no-pull`.
+
+The author's live station was **not** modified by these tools; adoption/upgrade is always
+an explicit user action with a snapshot.
+
 ### Manual / advanced quick start
 
 ```bash
@@ -141,6 +214,11 @@ sudo make prep
 make build
 sudo make install
 make status
+
+# after the first install
+make onboard
+make update
+make version
 ```
 
 If `prepare-system.sh` reports that the UART is not ready yet, reboot once and continue.
@@ -404,7 +482,8 @@ outside the supported install path.
 | user `mmdvm`; serial/I2C groups | boot order or firmware |
 | `/etc/mmdvm`, `/var/log/mmdvm`, `/var/lib/mmdvm` | unrelated services |
 | `/usr/local/bin` binaries (optional gateways only when enabled) | desktop/network configuration |
-| three to five systemd services | existing MMDVM/Pi-Star/WPSD (preflight refuses) |
+| three to five systemd services | existing MMDVM/Pi-Star/WPSD (first install refuses; update mode supports this add-on/legacy adoption) |
+| root-only snapshots under `/var/backups/mmdvm` (up to five) | logs, D-Star data, boot config |
 | Pi only: `config.txt` overlay/backup; serial getty disabled | boot config on x86 (none) |
 
 `uninstall.sh` removes the add-on files, stops the services, and restores the Pi boot
@@ -481,6 +560,9 @@ the configured reflector/module; registration requirements vary by network.
 | OLED blank | `ENABLE_OLED=auto`/`1`; `i2cdetect -y <bus>`; check bus/address, controller, size, rotation and permissions. |
 | OLED garbled/offset | Try `OLED_CONTROLLER=sh1106` for a 1.3" panel; check `OLED_SIZE`; use `OLED_ROTATE=180` if upside down. |
 | CJK boxes on OLED | Install DejaVu + Droid fallback fonts; the preview uses mixed-font rendering. |
+| `./mmdvm update` says "legacy install" | Try `--dry-run`, then `--adopt` after confirming the snapshot path; Pi-Star/WPSD is always refused. |
+| Update failed and rolled back | Inspect the printed `/var/backups/mmdvm/<timestamp>` path and `journalctl -u mmdvmhost`; nothing should be lost. |
+| Snapshot restore needed | `sudo python3 scripts/state_backup.py restore /var/backups/mmdvm/<timestamp>` |
 
 ## Uninstall
 
@@ -497,6 +579,8 @@ On x86 there is no boot config or GPIO overlay to restore. Shared packages are k
 - YSF needs no account or password. DMR/D-Star credentials are optional and local.
 - The BrandMeister password is stored only in `config.env` and `DMRGateway.ini`; it is
   never printed by the scripts and both files are git-ignored / mode-restricted.
+- Update snapshots can contain the DMR password. `/var/backups/mmdvm` is root-only
+  (mode 0700); keep it private and remove old snapshots if you no longer need rollback.
 - `config.env`, logs and build artifacts are git-ignored; the public example is `N0CALL`.
 - The YSF hosts file is static; review the reflector address yourself.
 - No MQTT broker, API token, web server or database is installed.
@@ -510,9 +594,13 @@ On x86 there is no boot config or GPIO overlay to restore. Shared packages are k
   the author. Treat them as experimental.
 - Only the SSD1306 128x64 OLED was tested; other sizes and SH1106 are selectable and
   preview-tested but not hardware-verified.
-- One static YSF reflector entry; changing reflectors requires editing and re-rendering.
+- One static YSF reflector entry; `./mmdvm onboard` edits it without hand-editing.
 - The Live Caller shows callsign + prefix-inferred country, not a name/city database.
-- This is not a Pi-Star/WPSD replacement; don't install it over an existing MMDVM stack.
+- This is not a Pi-Star/WPSD replacement. Update mode can adopt this add-on's own
+  legacy install, but refuses Pi-Star/WPSD and foreign MMDVM processes/ports.
+- Automatic code update requires a clean git checkout and network access; ZIP users
+  replace the source manually and use `./mmdvm update --no-pull`.
+- No web UI, HTTP server, database or MQTT broker.
 - No firmware flashing and no precompiled binaries/release binaries.
 
 ## GitHub access from mainland China

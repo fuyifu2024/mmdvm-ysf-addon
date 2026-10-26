@@ -22,6 +22,8 @@
 - `/etc/mmdvm`、`/var/log/mmdvm`、`/var/lib/mmdvm`
 - `/usr/local/bin/{MMDVM-Host,YSFGateway,oled_display.py}`；启用时还会安装
   `DMRGateway` / `dstargateway`
+- 日常命令 `./mmdvm onboard`、`./mmdvm update`、`./mmdvm status`
+- `/var/backups/mmdvm` 下的 root-only 更新快照，用于回滚
 - Raspberry Pi 上的 boot overlay（Pi 5 用 `uart0-pi5`；Pi 4/3 用
   `enable_uart` + BT overlay，实验性）
 - 构建/运行依赖（见下文）
@@ -74,7 +76,9 @@ UART、USB 枚举、I2C、systemd 安装、射频或反射器 link。只有下�
 - 可选 OLED 需要 Python 3 + Pillow（`python3-pil`）。
 - DMR：需要 DMR ID 和 BrandMeister 热点安全密码。
 - D-Star：需要支持 D-Star/已注册的呼号和反射器（注册规则取决于反射器网络）。
-- 机器上不能已有 MMDVM / Pi-Star / WPSD；preflight 会拒绝覆盖。
+- 首次安装时机器上不能已有 MMDVM / Pi-Star / WPSD；preflight 会拒绝覆盖。
+  `./mmdvm update` 有独立的快照式接管模式，只支持本 add-on 的 legacy 安装，
+  仍拒绝 Pi-Star/WPSD。
 - 本项目**不**刷固件、不提供预编译镜像。
 
 ## 快速开始
@@ -108,6 +112,69 @@ Pi 4/3 首次可能提示重启；重启后重新运行 `./setup.sh`，配置和
 x86 若找不到串口，接上 USB MMDVM 调制解调器后重跑。`prepare-system.sh` 不会重启
 无关服务；`install-services.sh` 只重启本项目的服务。
 
+## 日常命令
+
+首次安装完成后，用仓库根目录的 `./mmdvm`，不用反复跑安装器：
+
+```bash
+./mmdvm onboard        # 改呼号/频率/反射器/OLED/DMR/D-Star
+./mmdvm update         # 拉代码、构建、无损重装
+./mmdvm status         # 等同 scripts/status.sh
+./mmdvm version        # 仓库版本 + 已安装版本
+./mmdvm help
+```
+
+### 快速改配置（onboard）
+
+`onboard` 读取现有 `config.env`，每个字段都显示当前值；直接回车保留原值。DMR 密码
+不会显示，密码提示留空即保留。
+
+```bash
+./mmdvm onboard --dry-run    # 只校验并显示变更，不写文件
+./mmdvm onboard              # 交互修改并应用
+./mmdvm onboard --no-apply   # 只保存 config.env，不重启服务
+```
+
+候选配置使用和 setup 相同的渲染器校验。应用时会先快照，再渲染、按需编译新启用的
+可选网关、安装服务并检查 active；任何一步失败都会恢复上一份配置、二进制、unit 和
+服务状态。
+
+如果 `config.env` 不存在但 `/etc/mmdvm` 已存在（包括同样是 `ysfgateway`/`mmdvmhost`
+unit 的手动安装），onboard 会先询问是否导入呼号、频率、串口、反射器、OLED、DMR 和
+D-Star 设置。读取 root 所有的 `/etc/mmdvm` 可能需要 sudo；DMR 密码只写入本地，
+不会打印。
+
+### 无损更新（update）
+
+```bash
+./mmdvm update --dry-run     # 显示版本/状态和新配置键；不用 sudo
+./mmdvm update               # 拉取、快照、构建、安装、验证
+./mmdvm update --no-pull     # 用当前源码树（ZIP/手动覆盖）
+./mmdvm update --adopt       # 非交互接管旧的 /etc/mmdvm 安装
+```
+
+修改系统前，`update` 会在 `/var/backups/mmdvm/<UTC 时间戳>/` 建立 root-only 快照：
+
+- `/etc/mmdvm`（包括 DMR 凭据）
+- 本项目的二进制、systemd unit、drop-in 和 logrotate 文件
+- 仓库的 `config.env`
+- 每个服务的 enabled/active 状态
+
+保留最近 5 份。日志、`/var/lib/mmdvm` 的 D-Star 数据、Pi boot 配置都不动。校验、构建、
+安装或安装后的服务检查失败时，会自动恢复快照并重启旧服务。成功后快照保留，可手动
+回滚：
+
+```bash
+sudo python3 scripts/state_backup.py restore /var/backups/mmdvm/<时间戳>
+```
+
+`update` 只把 `config.example.env` 里新增的键按默认值补进去，不覆盖已有值。仓库是
+干净的 git checkout 时会先跑 `git pull --ff-only`；工作树有改动、网络失败或不能
+快进时，会在修改系统前中止。Download ZIP 用户请手动替换源码并用 `--no-pull`。
+
+作者的现场电台**不会**被这些工具自动修改；接管/升级始终由用户显式执行，并先生成
+快照。
+
 ### 手动/进阶安装
 
 ```bash
@@ -131,6 +198,11 @@ sudo make prep
 make build
 sudo make install
 make status
+
+# 首次安装之后
+make onboard
+make update
+make version
 ```
 
 如果 `prepare-system.sh` 提示 UART 尚未就绪，重启一次再继续。
@@ -380,7 +452,8 @@ OLED（可选，I2C）◄── oled_display.py ◄── /var/log/mmdvm 日志
 | 用户 `mmdvm`；串口/I2C 用户组 | 启动顺序或固件 |
 | `/etc/mmdvm`、`/var/log/mmdvm`、`/var/lib/mmdvm` | 无关服务 |
 | `/usr/local/bin` 下的二进制（可选网关只在启用时） | 桌面/网络配置 |
-| 三到五个 systemd 服务 | 已有 MMDVM/Pi-Star/WPSD（preflight 会拒绝） |
+| 三到五个 systemd 服务 | 已有 MMDVM/Pi-Star/WPSD（首次安装拒绝；update 模式支持本 add-on/legacy 接管） |
+| `/var/backups/mmdvm` 下 root-only 快照（最多 5 份） | 日志、D-Star 数据、boot 配置 |
 | 仅 Pi：`config.txt` overlay/备份；禁用 serial getty | x86 的 boot 配置（完全不动） |
 
 `uninstall.sh` 会删除 add-on 文件、停止服务，并从备份恢复 Pi boot 配置。
@@ -456,6 +529,9 @@ D-Star 用 DR 模式并选择配置的反射器/模块；注册要求因网络�
 | OLED 不亮 | `ENABLE_OLED=auto`/`1`；`i2cdetect -y <bus>`；检查总线/地址、控制器、尺寸、旋转和权限。 |
 | OLED 花屏/偏移 | 1.3" 屏尝试 `OLED_CONTROLLER=sh1106`；检查 `OLED_SIZE`；装反用 `OLED_ROTATE=180`。 |
 | OLED 中文方框 | 安装 DejaVu + Droid fallback 字体；预览使用混合字体渲染。 |
+| `./mmdvm update` 提示 legacy install | 先 `--dry-run` 看计划，确认后加 `--adopt`；Pi-Star/WPSD 始终拒绝。 |
+| 更新失败并回滚 | 看输出的 `/var/backups/mmdvm/<时间戳>` 和 `journalctl -u mmdvmhost`；配置/日志不应丢。 |
+| 需要手动恢复快照 | `sudo python3 scripts/state_backup.py restore /var/backups/mmdvm/<时间戳>` |
 
 ## 卸载
 
@@ -472,6 +548,8 @@ x86 没有 boot 配置或 GPIO overlay 需要恢复。共享软件包会保留�
 - YSF 不需要账号或密码；DMR/D-Star 凭据是可选的，且只存本地。
 - BrandMeister 密码只写入 `config.env` 和 `DMRGateway.ini`；脚本不会打印，两个文件
   都被 git 忽略/权限受限。
+- 更新快照可能包含 DMR 密码；`/var/backups/mmdvm` 必须是 root-only（0700），
+  不需要回滚时请自行删除旧快照。
 - `config.env`、日志和构建产物都被 git 忽略；公开示例是 `N0CALL`。
 - YSF hosts 文件是静态的；反射器地址请自行确认。
 - 不安装 MQTT broker、API token、Web 服务器或数据库。
@@ -483,9 +561,13 @@ x86 没有 boot 配置或 GPIO overlay 需要恢复。共享软件包会保留�
 - Pi 4/3 是实验性；x86 只做构建/CI/文档支持。
 - DMR 和 D-Star 已实现且 CI 会构建，但作者**未实机验证**，请当作实验性功能。
 - 只实测过 SSD1306 128x64；其它尺寸和 SH1106 可选并有预览测试，但未硬件验证。
-- 只有一个静态 YSF 反射器条目；换反射器需要改配置并重新渲染。
+- 只有一个静态 YSF 反射器条目；`./mmdvm onboard` 可直接改，不需要手编。
 - Live Caller 只显示呼号 + 前缀推断的国家，不是姓名/城市数据库。
-- 它不是 Pi-Star/WPSD 替代品；不要装到已有 MMDVM 栈上。
+- 它不是 Pi-Star/WPSD 替代品。update 模式只接管本 add-on 自己的 legacy 安装，
+  仍拒绝 Pi-Star/WPSD 和外来 MMDVM 进程/端口。
+- 自动更新代码需要干净的 git checkout 和网络；ZIP 用户请手动替换源码后跑
+  `./mmdvm update --no-pull`。
+- 没有 Web UI、HTTP 服务、数据库或 MQTT broker。
 - 不刷固件，也不提供预编译二进制/发布版二进制。
 
 ## 中国大陆访问 GitHub

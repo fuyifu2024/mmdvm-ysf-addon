@@ -11,15 +11,25 @@ BIN="$BUILD/bin"
 ETC="$BUILD/etc"
 PLATFORM="$(detect_platform)"
 DRY_RUN=0
+UPDATE_MODE=0
+ADOPT=0
+NO_BACKUP=0
+BACKUP_DIR=""
 
-for arg in "$@"; do
-	case "$arg" in
-		--dry-run) DRY_RUN=1 ;;
+while (( $# > 0 )); do
+	case "$1" in
+		--dry-run) DRY_RUN=1; shift ;;
+		--update) UPDATE_MODE=1; shift ;;
+		--adopt) UPDATE_MODE=1; ADOPT=1; shift ;;
+		--no-backup) NO_BACKUP=1; shift ;;
 		-h|--help)
-			echo "usage: sudo $0 [--dry-run]"
+			echo "usage: sudo $0 [--dry-run] [--update] [--adopt] [--no-backup]"
+			echo "  --update     allow updating an existing add-on installation"
+			echo "  --adopt      allow a legacy /etc/mmdvm install (implies --update)"
+			echo "  --no-backup  caller already made a state snapshot"
 			exit 0
 			;;
-		*) echo "unknown option: $arg" >&2; exit 2 ;;
+		*) echo "unknown option: $1" >&2; exit 2 ;;
 	esac
 done
 
@@ -64,7 +74,10 @@ if (( DRY_RUN == 0 )); then
 		echo "ERROR: run this script with sudo (or use --dry-run)." >&2
 		exit 1
 	fi
-	if ! MMDVM_PLATFORM="$PLATFORM" bash "$REPO_DIR/scripts/preflight.sh"; then
+	PREFLIGHT_ARGS=()
+	(( UPDATE_MODE )) && PREFLIGHT_ARGS+=(--update)
+	(( ADOPT )) && PREFLIGHT_ARGS+=(--adopt)
+	if ! MMDVM_PLATFORM="$PLATFORM" bash "$REPO_DIR/scripts/preflight.sh" "${PREFLIGHT_ARGS[@]}"; then
 		echo "Preflight failed; refusing to install over an existing MMDVM configuration." >&2
 		exit 1
 	fi
@@ -126,6 +139,7 @@ echo
 echo "== planned changes =="
 cat <<EOF
   platform: $PLATFORM
+  mode:     $([[ $UPDATE_MODE == 1 ]] && echo "update (existing install preserved)" || echo "first install")
   modem:    $MODEM_PORT (group $PORT_GROUP)
   modes:    YSF=on DMR=$([[ $DMR == 1 ]] && echo on || echo off) D-Star=$([[ $DSTAR == 1 ]] && echo on || echo off)
   add system user mmdvm (groups $PLANNED_GROUPS)
@@ -146,6 +160,22 @@ echo
 if (( DRY_RUN )); then
 	echo "dry-run: no changes made."
 	exit 0
+fi
+
+INSTALL_OK=0
+if (( UPDATE_MODE && NO_BACKUP == 0 )); then
+	if ! BACKUP_DIR="$(python3 "$REPO_DIR/scripts/state_backup.py" create)"; then
+		echo "ERROR: could not create a state snapshot; refusing to update." >&2
+		exit 1
+	fi
+	echo "snapshot: $BACKUP_DIR"
+	# Direct install-services --update calls get a rollback too.  safe-install.sh
+	# passes --no-backup because it owns the snapshot and rollback.
+	trap 'rc=$?; if (( rc != 0 && INSTALL_OK == 0 )); then
+		echo "ERROR: install failed; restoring $BACKUP_DIR" >&2
+		python3 "$REPO_DIR/scripts/state_backup.py" restore "$BACKUP_DIR" || \
+			echo "RESTORE FAILED; manual rollback needed: $BACKUP_DIR" >&2
+	fi' EXIT
 fi
 
 if ! id -u mmdvm >/dev/null 2>&1; then
@@ -183,6 +213,10 @@ install -m 0640 -o root -g mmdvm "$ETC/YSFGateway.ini" /etc/mmdvm/YSFGateway.ini
 install -m 0640 -o root -g mmdvm "$ETC/oled.env" /etc/mmdvm/oled.env
 install -m 0644 "$ETC/YSFHosts.json" /etc/mmdvm/YSFHosts.json
 install -m 0644 "$ETC/system.env" /etc/mmdvm/system.env
+VERSION="$(tr -d '[:space:]' < "$REPO_DIR/VERSION" 2>/dev/null || echo unknown)"
+printf 'ADDON=mmdvm-ysf-addon\nADDON_VERSION=%s\nCONFIG_FORMAT=1\nINSTALLED_AT=%s\n' \
+	"$VERSION" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > /etc/mmdvm/addon.env
+chmod 0644 /etc/mmdvm/addon.env
 if (( DMR )); then
 	install -m 0640 -o root -g mmdvm "$ETC/DMRGateway.ini" /etc/mmdvm/DMRGateway.ini
 else
@@ -265,6 +299,8 @@ tail -n 20 /var/log/mmdvm/mmdvmhost.log 2>/dev/null || true
 if (( DSTAR )); then
 	journalctl -u dstargateway.service -n 20 --no-pager 2>/dev/null || true
 fi
+INSTALL_OK=1
+trap - EXIT
 echo
 echo "Installed. Check with: ./scripts/status.sh"
 echo "If MMDVM-Host is restarting, inspect $MODEM_PORT and the logs."
