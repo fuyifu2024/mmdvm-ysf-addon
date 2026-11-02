@@ -456,7 +456,7 @@ OLED（可选，I2C）◄── oled_display.py ◄── /var/log/mmdvm 日志
 | `/var/backups/mmdvm` 下 root-only 快照（最多 5 份） | 日志、D-Star 数据、boot 配置 |
 | 仅 Pi：`config.txt` overlay/备份；禁用 serial getty | x86 的 boot 配置（完全不动） |
 
-`uninstall.sh` 会删除 add-on 文件、停止服务，并从备份恢复 Pi boot 配置。
+`uninstall.sh` 会删除 add-on 文件、停止服务，并保留 Pi boot 配置；如有需要请手动检查 MMDVM 相关设置。
 它**不会**卸载共享软件包。
 
 ## 上游源码与补丁
@@ -536,7 +536,7 @@ D-Star 用 DR 模式并选择配置的反射器/模块；注册要求因网络�
 ## 卸载
 
 ```bash
-sudo ./scripts/uninstall.sh            # 停止/删除 add-on，恢复 Pi boot 配置
+sudo ./scripts/uninstall.sh            # 停止/删除 add-on，保留 Pi boot 配置
 sudo ./scripts/uninstall.sh --dry-run  # 只打印动作
 sudo ./scripts/uninstall.sh --purge    # 同时删除 /var/log/mmdvm 和 mmdvm 用户
 ```

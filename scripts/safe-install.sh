@@ -49,7 +49,7 @@ done
 
 case "$BUILD_MODE" in auto|always|never) ;; *) echo "invalid --build mode: $BUILD_MODE" >&2; exit 2 ;; esac
 [[ "$CANDIDATE" == "" || -f "$CANDIDATE" ]] || { echo "ERROR: candidate not found: $CANDIDATE" >&2; exit 1; }
-[[ -f "$CONFIG" ]] || { echo "ERROR: $CONFIG missing; run ./setup.sh first" >&2; exit 1; }
+[[ -f "$CONFIG" || -n "$CANDIDATE" ]] || { echo "ERROR: $CONFIG missing; run ./setup.sh first" >&2; exit 1; }
 if [[ "${EUID:-$(id -u)}" -eq 0 && "${MMDVM_TEST_MODE:-0}" != "1" ]]; then
 	echo "ERROR: run safe-install.sh as your normal user, not root." >&2
 	echo "It calls sudo for snapshot/install/restore." >&2

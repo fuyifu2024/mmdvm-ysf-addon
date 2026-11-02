@@ -26,6 +26,7 @@ import os
 import re
 import sys
 from pathlib import Path
+from addon_config import write_text_atomic
 
 REPO = Path(__file__).resolve().parent.parent
 TEMPLATES = REPO / "templates"
@@ -456,7 +457,7 @@ def render(values: dict[str, object], output: Path, platform: str) -> list[Path]
 
     if values["enable_dmr"]:
         dmr_ini = expand(template("DMRGateway.ini.in"), mapping)
-        (etc / "DMRGateway.ini").write_text(dmr_ini, encoding="utf-8")
+        write_text_atomic(etc / "DMRGateway.ini", dmr_ini, mode=0o600)
         written.append(etc / "DMRGateway.ini")
 
     if values["enable_dstar"]:

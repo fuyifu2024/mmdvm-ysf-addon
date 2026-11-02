@@ -140,8 +140,18 @@ MODEM_REQUESTED="${MODEM_REQUESTED:-auto}"
 if MODEM_RESOLVED="$(detect_modem_port "$MODEM_REQUESTED" 2>/dev/null)"; then
 	ok "modem port: $MODEM_RESOLVED"
 	if command -v fuser >/dev/null 2>&1; then
-		if fuser "$MODEM_RESOLVED" >/dev/null 2>&1; then
-			bad "$MODEM_RESOLVED is currently in use by another process"
+		if modem_pids="$(fuser "$MODEM_RESOLVED" 2>/dev/null)" && [[ -n "$modem_pids" ]]; then
+			modem_owned=1
+			for pid in $modem_pids; do
+				if ! (( UPDATE_MODE )) || ! process_is_addon "$pid"; then
+					modem_owned=0
+				fi
+			done
+			if (( modem_owned )); then
+				ok "$MODEM_RESOLVED is in use by the add-on (update mode)"
+			else
+				bad "$MODEM_RESOLVED is currently in use by another process"
+			fi
 		else
 			ok "$MODEM_RESOLVED is free"
 		fi

@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -129,8 +130,14 @@ def prune_backups(root: Path = BACKUP_ROOT, keep: int = 5,
                   keep_current: Path | None = None) -> None:
     if not root.is_dir():
         return
-    candidates = sorted((p for p in root.iterdir() if p.is_dir()),
-                        key=lambda p: p.name)
+    def backup_key(path: Path):
+        match = re.fullmatch(r"(\d{8}T\d{6}Z)(?:-(\d+))?", path.name)
+        return (match.group(1), int(match.group(2) or 0)) if match else None
+
+    candidates = sorted((p for p in root.iterdir()
+                         if not p.is_symlink() and p.is_dir()
+                         and backup_key(p) is not None
+                         and (p / "manifest.json").is_file()), key=backup_key)
     protected = {keep_current.resolve()} if keep_current else set()
     for old in candidates[:-keep] if keep > 0 else candidates:
         if old.resolve() in protected:
@@ -150,6 +157,19 @@ def restore_backup(target: Path) -> None:
     if not target.is_dir() or not (target / "manifest.json").is_file():
         raise SystemExit(f"ERROR: not a valid add-on backup: {target}")
     manifest = json.loads((target / "manifest.json").read_text(encoding="utf-8"))
+    required = {
+        "etc_present": (target / "etc", Path.is_dir),
+        "config_present": (target / "config" / "config.env", Path.is_file),
+        "dropin_present": (target / "units" / DROPIN.name, Path.is_dir),
+        "logrotate_present": (target / "logrotate" / "mmdvm", Path.is_file),
+    }
+    if not isinstance(manifest, dict):
+        raise SystemExit("ERROR: invalid backup manifest")
+    for key, (path, check) in required.items():
+        if not isinstance(manifest.get(key), bool):
+            raise SystemExit(f"ERROR: invalid backup manifest field: {key}")
+        if manifest[key] and not check(path):
+            raise SystemExit(f"ERROR: backup is incomplete: missing {path}")
     states = []
     services_file = target / "services.json"
     if services_file.is_file():

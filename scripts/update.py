@@ -228,7 +228,9 @@ def main() -> int:
                "--build", "always", "--yes"]
         if adopt:
             cmd.append("--adopt")
-        result = subprocess.run(cmd)
+        env = os.environ.copy()
+        env["MMDVM_CONFIG"] = str(config)
+        result = subprocess.run(cmd, env=env)
         if result.returncode != 0:
             return result.returncode
         print(f"Updated to {new_version}.")

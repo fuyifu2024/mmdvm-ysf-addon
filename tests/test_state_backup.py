@@ -94,6 +94,31 @@ class StateBackupTests(unittest.TestCase):
         backups = sorted(p for p in self.backup.iterdir() if p.is_dir())
         self.assertLessEqual(len(backups), 3)
 
+    def test_incomplete_backup_does_not_remove_current_state(self):
+        result = self._run("create")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        target = Path(result.stdout.strip())
+        (target / "config" / "config.env").unlink()
+        result = self._run("restore", str(target))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("backup is incomplete", result.stderr)
+        self.assertEqual(self.config.read_text(), "CALLSIGN=BI2RIP\n")
+        self.assertEqual((self.etc / "MMDVM-Host.ini").read_text(), "old-host\n")
+
+    def test_prune_only_removes_old_snapshots_in_numeric_order(self):
+        self.backup.mkdir()
+        for name in ("20261102T120000Z", "20261102T120000Z-2", "20261102T120000Z-10"):
+            path = self.backup / name
+            path.mkdir()
+            (path / "manifest.json").write_text("{}")
+        unrelated = self.backup / "personal-files"
+        unrelated.mkdir()
+        result = self._run("prune", "--keep", "1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(unrelated.exists())
+        self.assertTrue((self.backup / "20261102T120000Z-10").exists())
+        self.assertFalse((self.backup / "20261102T120000Z-2").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -72,14 +72,14 @@ else
 fi
 
 echo
-echo "== restoring boot config (Pi only) =="
+echo "== boot config (Pi only) =="
 if platform_is_pi; then
 	RESTORED=0
 	for backup in /boot/firmware/config.txt.bak-mmdvm-addon /boot/config.txt.bak-mmdvm-addon; do
 		if [[ -f "$backup" ]]; then
 			config="${backup%.bak-mmdvm-addon}"
-			echo "restoring $config from $backup (this reverts later edits to boot config)"
-			say_run cp "$backup" "$config"
+			echo "Keeping $config unchanged; original backup is $backup."
+			echo "Review MMDVM boot settings manually if they are no longer needed."
 			RESTORED=1
 		fi
 	done

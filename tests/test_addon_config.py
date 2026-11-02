@@ -3,12 +3,14 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
 
 import addon_config as ac  # noqa: E402
+import onboard  # noqa: E402
 
 
 HOST_INI = """\
@@ -192,6 +194,38 @@ class ConfigTests(unittest.TestCase):
 
 
 class UpdateCliTests(unittest.TestCase):
+    def test_onboard_apply_passes_selected_config_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = Path(tmp) / "custom.env"
+            candidate = Path(tmp) / "candidate.env"
+            with patch.object(onboard.subprocess, "run") as run:
+                run.return_value.returncode = 0
+                self.assertEqual(onboard.apply_candidate(config, candidate, False, False), 0)
+                self.assertEqual(run.call_args.kwargs["env"]["MMDVM_CONFIG"], str(config))
+
+    def test_render_dmr_password_file_is_private_even_on_rerender(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = root / "config.env"
+            text = (REPO / "config.example.env").read_text(encoding="utf-8")
+            for before, after in (("CALLSIGN=N0CALL", "CALLSIGN=BI2RIP"),
+                                  ("MODEM_PORT=auto", "MODEM_PORT=/dev/null"),
+                                  ("ENABLE_DMR=0", "ENABLE_DMR=1"),
+                                  ("DMR_ID=0", "DMR_ID=1234567"),
+                                  ("DMR_PASSWORD=", "DMR_PASSWORD=test-password")):
+                text = text.replace(before, after)
+            config.write_text(text, encoding="utf-8")
+            output = root / "build"
+            (output / "etc").mkdir(parents=True)
+            old = output / "etc" / "DMRGateway.ini"
+            old.write_text("old")
+            old.chmod(0o644)
+            result = subprocess.run([sys.executable, str(REPO / "scripts/render_configs.py"),
+                                     "--config", str(config), "--output", str(output)],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(old.stat().st_mode & 0o777, 0o600)
+
     def test_update_dry_run_does_not_write(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)

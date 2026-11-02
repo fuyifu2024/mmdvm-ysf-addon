@@ -252,7 +252,8 @@ if [[ "$PORT_GROUP" != "dialout" ]]; then
 	printf '[Service]\nSupplementaryGroups=%s\n' "$PORT_GROUP" \
 		> /etc/systemd/system/mmdvmhost.service.d/20-port-group.conf
 else
-	rm -rf /etc/systemd/system/mmdvmhost.service.d
+	rm -f /etc/systemd/system/mmdvmhost.service.d/20-port-group.conf
+	rmdir /etc/systemd/system/mmdvmhost.service.d 2>/dev/null || true
 fi
 
 systemctl daemon-reload

@@ -318,7 +318,9 @@ def apply_candidate(config: Path, candidate: Path, adopted: bool,
     if adopted:
         cmd.append("--adopt")
     print("Applying configuration (snapshot + install + service check)...")
-    result = subprocess.run(cmd)
+    env = os.environ.copy()
+    env["MMDVM_CONFIG"] = str(config.resolve())
+    result = subprocess.run(cmd, env=env)
     return result.returncode
 
 

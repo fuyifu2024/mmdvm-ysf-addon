@@ -486,8 +486,8 @@ outside the supported install path.
 | root-only snapshots under `/var/backups/mmdvm` (up to five) | logs, D-Star data, boot config |
 | Pi only: `config.txt` overlay/backup; serial getty disabled | boot config on x86 (none) |
 
-`uninstall.sh` removes the add-on files, stops the services, and restores the Pi boot
-config from its backup. It does **not** remove shared packages.
+`uninstall.sh` removes the add-on files and stops the services. It preserves the Pi
+boot config; review any MMDVM-specific settings manually. It does **not** remove shared packages.
 
 ## Upstream sources and patches
 
@@ -567,7 +567,7 @@ the configured reflector/module; registration requirements vary by network.
 ## Uninstall
 
 ```bash
-sudo ./scripts/uninstall.sh            # stop/remove add-on, restore Pi boot config
+sudo ./scripts/uninstall.sh            # stop/remove add-on, keep Pi boot config
 sudo ./scripts/uninstall.sh --dry-run  # print actions only
 sudo ./scripts/uninstall.sh --purge    # also remove /var/log/mmdvm and mmdvm user
 ```

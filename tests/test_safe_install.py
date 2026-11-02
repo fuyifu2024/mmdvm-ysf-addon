@@ -40,6 +40,14 @@ class SafeInstallDryRunTests(unittest.TestCase):
             self.assertIn("dry-run: no snapshot", result.stdout)
             self.assertEqual(config.read_text(encoding="utf-8"), before)
 
+            missing = tmp / "new-config.env"
+            env["MMDVM_CONFIG"] = str(missing)
+            result = subprocess.run(
+                [str(REPO / "scripts" / "safe-install.sh"), "--candidate", str(config),
+                 "--dry-run", "--yes"], cwd=REPO, env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(missing.exists())
+
 
 if __name__ == "__main__":
     unittest.main()
