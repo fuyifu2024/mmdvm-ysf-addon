@@ -139,9 +139,9 @@ def prune_backups(root: Path = BACKUP_ROOT, keep: int = 5,
                          and backup_key(p) is not None
                          and (p / "manifest.json").is_file()), key=backup_key)
     protected = {keep_current.resolve()} if keep_current else set()
-    for old in candidates[:-keep] if keep > 0 else candidates:
-        if old.resolve() in protected:
-            continue
+    unprotected = [p for p in candidates if p.resolve() not in protected]
+    remaining = max(0, keep - len(protected))
+    for old in unprotected[:-remaining] if remaining else unprotected:
         shutil.rmtree(old, ignore_errors=True)
 
 

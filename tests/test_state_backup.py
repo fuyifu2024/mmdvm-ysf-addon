@@ -119,6 +119,19 @@ class StateBackupTests(unittest.TestCase):
         self.assertTrue((self.backup / "20261102T120000Z-10").exists())
         self.assertFalse((self.backup / "20261102T120000Z-2").exists())
 
+    def test_prune_protects_current_without_exceeding_limit(self):
+        sys.path.insert(0, str(REPO / "scripts"))
+        import state_backup
+        self.backup.mkdir()
+        for suffix in ("", "-1", "-2", "-3"):
+            path = self.backup / ("20261102T120000Z" + suffix)
+            path.mkdir()
+            (path / "manifest.json").write_text("{}")
+        current = self.backup / "20261102T120000Z-1"
+        state_backup.prune_backups(self.backup, keep=3, keep_current=current)
+        self.assertTrue(current.exists())
+        self.assertEqual(len(list(self.backup.iterdir())), 3)
+
 
 if __name__ == "__main__":
     unittest.main()
