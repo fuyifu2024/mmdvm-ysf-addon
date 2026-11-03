@@ -506,8 +506,8 @@ It applies two patches to YSFGateway:
    for the hosts file; a root-owned read-only `/etc/mmdvm/YSFHosts.json` caused `EACCES`.
    The patch uses `std::ifstream`.
 
-`upstream.lock` records URLs and SHA-256 checksums. If upstream changes, the build fails;
-update the lock and re-test the patches deliberately.
+`upstream.lock` records immutable commit URLs and SHA-256 checksums. To update
+upstream, change the revision and checksum together and re-test the patches.
 
 ## Verify
 

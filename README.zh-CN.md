@@ -476,8 +476,8 @@ OLED（可选，I2C）◄── oled_display.py ◄── /var/log/mmdvm 日志
    hosts 文件，root 只读的 `/etc/mmdvm/YSFHosts.json` 会触发 `EACCES`；补丁改用
    `std::ifstream`。
 
-`upstream.lock` 记录 URL 和 SHA-256。上游变化时构建会失败；确认补丁兼容后再更新
-lock。
+`upstream.lock` 记录固定提交的 URL 和 SHA-256。更新上游时应同时更新提交和校验和，
+并重新验证补丁。
 
 ## 验证
 

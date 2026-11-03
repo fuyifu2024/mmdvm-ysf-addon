@@ -1,13 +1,10 @@
-# Upstream source lock, captured 2026-10-24.
-#
-# The URLs point at g4klx master, but the SHA-256 values pin the exact content
-# that was built and tested.  If upstream changes, build.sh fails with a clear
-# checksum error; update the URL/checksum and re-test the patches deliberately.
-MMDVMHOST_URL=https://codeload.github.com/g4klx/MMDVMHost/tar.gz/refs/heads/master
-MMDVMHOST_SHA256=f057ed1d2384a8233fbc6c50f02a680607f66cabaa39d62fe24283849a4fd0e1
-YSFCLIENTS_URL=https://codeload.github.com/g4klx/YSFClients/tar.gz/refs/heads/master
-YSFCLIENTS_SHA256=710681a5d7143a2d2c4b5b0727012649bbe175b6e46a10952a1276999e634697
-DMRGATEWAY_URL=https://codeload.github.com/g4klx/DMRGateway/tar.gz/refs/heads/master
-DMRGATEWAY_SHA256=a1224a979f89b2d0fcddcfbcbf187641804b9690bda629125371fd9ecd736794
-DSTARGATEWAY_URL=https://codeload.github.com/F4FXL/DStarGateway/tar.gz/refs/heads/master
-DSTARGATEWAY_SHA256=be87d6e6f1f50cbf894310b290f7b504213295309034b1056dcbe7fd76deb266
+# Upstream source revisions, recovered from the versions used in October 2026.
+# Immutable commit archives and SHA-256 checksums ensure repeatable downloads.
+MMDVMHOST_URL=https://codeload.github.com/g4klx/MMDVMHost/tar.gz/9384d683c9993f67af52b062b1bf9d4df11b6446
+MMDVMHOST_SHA256=854f31ea372726873fcb6e0428dff028ee2f7955809c4da10b5ccc5a45a5ca94
+YSFCLIENTS_URL=https://codeload.github.com/g4klx/YSFClients/tar.gz/6e9359db895807bf5242917be0beac523f973e65
+YSFCLIENTS_SHA256=13564fcf2fc34ed576b68839ce87af0146a22f5147bcca191eb556345e18f165
+DMRGATEWAY_URL=https://codeload.github.com/g4klx/DMRGateway/tar.gz/d751e20ed70816b3a834d3521aea58f03dd0b398
+DMRGATEWAY_SHA256=4215c9df916dd65dcc5995fec470023990a8969925c91dd643b37eef7610d9fa
+DSTARGATEWAY_URL=https://codeload.github.com/F4FXL/DStarGateway/tar.gz/18d11031ef77b731855fbd8756ccf84d531838ee
+DSTARGATEWAY_SHA256=bfcb554bb5555b740e9bdaa05a7e7aa9116be78563f9225a8e4c14cddff5c325
